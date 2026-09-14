@@ -76,6 +76,9 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const isMountedRef = useRef(true);
   const isStartingRef = useRef(false);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const availableCamerasRef = useRef<CameraDevice[]>([]);
+  const activeCameraIdRef = useRef<string>('');
+
   const fileCaptureInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -146,7 +149,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     // Stop previous instance before starting new one
     await forceStopCamera();
 
-    // Small delay to allow operating system to release camera hardware
+    // Delay to allow operating system and browser to release camera hardware
     await new Promise((r) => setTimeout(r, 120));
     if (!isMountedRef.current) {
       isStartingRef.current = false;
@@ -155,16 +158,15 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
     try {
       // 1. Discover available cameras
-      let camList = availableCameras;
+      let camList = availableCamerasRef.current;
       if (camList.length === 0) {
         try {
-          // Probe stream to request permission and populate device labels
           if (navigator.mediaDevices?.getUserMedia) {
             const probe = await navigator.mediaDevices.getUserMedia({ video: true });
             probe.getTracks().forEach((t) => t.stop());
           }
         } catch {
-          // Continue to enumerate
+          // Probe may fail if permission denied
         }
 
         try {
@@ -174,6 +176,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
               id: c.id,
               label: c.label || `กล้อง ${idx + 1}`,
             }));
+            availableCamerasRef.current = camList;
             if (isMountedRef.current) {
               setAvailableCameras(camList);
             }
@@ -184,23 +187,26 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       }
 
       // 2. Determine target camera ID
-      let targetId = preferredCameraId || activeCameraId;
+      let targetId = preferredCameraId || activeCameraIdRef.current;
       if (!targetId && camList.length > 0) {
         const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         if (isMobile) {
-          // Pick rear/back camera for mobile
+          // Rear camera for mobile
           const back = camList.find((c) =>
             /back|rear|environment|หลัง/i.test(c.label)
           ) || camList[camList.length - 1];
           targetId = back.id;
         } else {
-          // Pick primary camera for laptop/desktop
+          // Primary camera for PC / laptop
           targetId = camList[0].id;
         }
       }
 
-      if (targetId && isMountedRef.current) {
-        setActiveCameraId(targetId);
+      if (targetId) {
+        activeCameraIdRef.current = targetId;
+        if (isMountedRef.current) {
+          setActiveCameraId(targetId);
+        }
       }
 
       // 3. Initialize Html5Qrcode scanner
@@ -210,13 +216,9 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       });
       html5QrCodeRef.current = scanner;
 
+      // Scan full frame (without restricting qrbox to avoid shaded border overlay)
       const scanConfig = {
         fps: 15,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = Math.floor(Math.min(viewfinderWidth * 0.85, 340));
-          const h = Math.floor(Math.min(viewfinderHeight * 0.65, 240));
-          return { width: Math.max(w, 200), height: Math.max(h, 130) };
-        },
       };
 
       // 4. Start scanner with camera ID or fallback facingMode
@@ -253,7 +255,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       const isSecure = window.isSecureContext !== false;
 
       if (isLineOrInApp) {
-        msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "ถ่ายรูปสแกน" ด้านล่างนี้ได้ทันที';
+        msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "ถ่ายรูปสแกน" ด้านล่างนี้';
       } else if (!isSecure) {
         msg = 'กล้องสดถูกจำกัดโดยระบบความปลอดภัยของเบราว์เซอร์ (ต้องใช้ HTTPS หรือ localhost) — สามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที';
       } else if (err && typeof err === 'object' && 'name' in err) {
@@ -271,7 +273,28 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         setIsCameraStarting(false);
       }
     }
-  }, [activeCameraId, availableCameras, forceStopCamera, handleSuccess]);
+  }, [forceStopCamera, handleSuccess]);
+
+  // Switch to specific camera ID
+  const switchCameraTo = useCallback(async (newCameraId: string) => {
+    activeCameraIdRef.current = newCameraId;
+    setActiveCameraId(newCameraId);
+    await startCamera(newCameraId);
+  }, [startCamera]);
+
+  // Switch to next camera in list
+  const switchCamera = useCallback(async () => {
+    const cams = availableCamerasRef.current;
+    if (cams.length <= 1) {
+      await startCamera();
+      return;
+    }
+    const currId = activeCameraIdRef.current;
+    const currIdx = cams.findIndex((c) => c.id === currId);
+    const nextIdx = currIdx >= 0 ? (currIdx + 1) % cams.length : 1;
+    const nextCam = cams[nextIdx];
+    await switchCameraTo(nextCam.id);
+  }, [startCamera, switchCameraTo]);
 
   // Toggle Torch/Flashlight
   const toggleTorch = async () => {
@@ -287,20 +310,6 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     } catch (e) {
       console.warn('Torch toggle error:', e);
     }
-  };
-
-  // Switch between cameras (cycles through all available cameras)
-  const switchCamera = () => {
-    if (availableCameras.length <= 1) {
-      // Toggle front/back fallback
-      startCamera();
-      return;
-    }
-    const currIdx = availableCameras.findIndex((c) => c.id === activeCameraId);
-    const nextIdx = (currIdx + 1) % availableCameras.length;
-    const nextCam = availableCameras[nextIdx];
-    setActiveCameraId(nextCam.id);
-    startCamera(nextCam.id);
   };
 
   // Handle image upload / camera snap photo scan
@@ -425,6 +434,35 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
           {activeTab === 'camera' ? (
             <div className="relative">
+              {/* Camera Selector Bar if multiple cameras detected */}
+              {availableCameras.length > 1 && (
+                <div className="flex items-center gap-2 mb-2 p-1.5 bg-slate-100 rounded-xl border border-slate-200">
+                  <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 pl-1 flex-shrink-0">
+                    <Video size={14} className="text-blue-600" />
+                    <span>เลือกกล้อง:</span>
+                  </span>
+                  <select
+                    value={activeCameraId}
+                    onChange={(e) => switchCameraTo(e.target.value)}
+                    className="flex-1 text-xs bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 truncate"
+                  >
+                    {availableCameras.map((cam, idx) => (
+                      <option key={cam.id} value={cam.id}>
+                        กล้อง {idx + 1}: {cam.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={switchCamera}
+                    className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium flex items-center gap-1 flex-shrink-0 transition-all active:scale-95 shadow-xs"
+                    title="สลับเป็นกล้องอีกตัว"
+                  >
+                    <RefreshCw size={12} /> สลับกล้อง
+                  </button>
+                </div>
+              )}
+
               {/* Scanner Viewport Box */}
               <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] border-2 border-slate-700 shadow-inner flex items-center justify-center">
                 <div
@@ -493,19 +531,19 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={switchCamera}
-                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md flex items-center gap-1 text-xs"
-                      title="สลับกล้อง / ลองกล้องอื่น"
-                    >
-                      <RefreshCw size={17} />
-                      {availableCameras.length > 1 && (
+                    {availableCameras.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={switchCamera}
+                        className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md flex items-center gap-1 text-xs"
+                        title="สลับกล้อง"
+                      >
+                        <RefreshCw size={17} />
                         <span className="text-[10px] font-mono px-0.5">
                           {availableCameras.findIndex((c) => c.id === activeCameraId) + 1}/{availableCameras.length}
                         </span>
-                      )}
-                    </button>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -521,31 +559,46 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                 )}
               </div>
 
-              {/* Helpful Notice & Black Screen Tips */}
-              <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
-                <span className="flex items-center gap-1">
-                  💡 หากภาพจอดำ: ตรวจสอบฝาเลื่อนปิดกล้อง (Shutter)
-                </span>
-                <button
-                  type="button"
-                  onClick={() => startCamera()}
-                  className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-                >
-                  <RefreshCw size={12} /> รีสตาร์ทกล้อง
-                </button>
+              {/* Helpful Troubleshooting for Black Screen */}
+              <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1.5 shadow-xs">
+                <div className="font-semibold flex items-center justify-between text-amber-950">
+                  <span className="flex items-center gap-1.5">
+                    💡 <span>ทำไมภาพถึงเป็นสีดำ? (วิธีแก้ไข):</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => startCamera(activeCameraIdRef.current)}
+                    className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 text-[11px]"
+                  >
+                    <RefreshCw size={12} /> รีสตาร์ทกล้อง
+                  </button>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-[11px] text-amber-800">
+                  {availableCameras.length > 1 && (
+                    <li>
+                      <b>ลองสลับกล้อง</b>: กดเลือก <b>กล้อง 2</b> ในเมนูด้านบน (โน้ตบุ๊กบางรุ่นแยกกล้องปกติกับกล้อง IR อินฟราเรด)
+                    </li>
+                  )}
+                  <li>
+                    <b>กดปุ่มเปิดกล้องที่คีย์บอร์ด</b>: โน้ตบุ๊ก (ASUS / Lenovo / MSI) ให้กด <b>Fn + F10</b> เพื่อเปิดฮาร์ดแวร์กล้อง
+                  </li>
+                  <li>
+                    <b>เปิดฝาสไลด์หน้ากล้อง</b>: ตรวจดูแถบสไลด์สีส้ม/ดำเหนือจอภาพว่าไม่ได้เลื่อนปิดบังหน้าเลนส์
+                  </li>
+                </ul>
               </div>
 
               {/* Error Notice & Mobile Help */}
               {cameraError && (
-                <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5 shadow-xs">
-                  <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="mt-2.5 p-3 bg-red-50 border border-red-200 rounded-xl text-red-900 text-xs flex items-start gap-2.5 shadow-xs">
+                  <AlertCircle size={18} className="text-red-600 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 space-y-1.5">
-                    <p className="font-semibold text-amber-950">{cameraError}</p>
+                    <p className="font-semibold text-red-950">{cameraError}</p>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => startCamera()}
-                        className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-semibold rounded-lg text-xs transition-all"
+                        className="px-2.5 py-1 bg-red-200 hover:bg-red-300 text-red-900 font-semibold rounded-lg text-xs transition-all"
                       >
                         ลองใหม่อีกครั้ง
                       </button>
