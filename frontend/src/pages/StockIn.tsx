@@ -333,6 +333,36 @@ export default function StockIn() {
     }
   };
 
+  // Delete a single PO and rollback stock
+  const handleDeletePO = async (poId: number, poNo: string) => {
+    if (!confirm(`คุณต้องการลบ/ยกเลิกเอกสารรับเข้า PO: ${poNo} ใช่หรือไม่?\n\n⚠️ ระบบจะทำการปรับคืนสต็อกสินค้าที่เคยรับเข้าในเอกสารนี้ให้อัตโนมัติ`)) {
+      return;
+    }
+    try {
+      const res = await api.delete(`/inventory/purchase-orders/${poId}`);
+      alert(res.data?.message || 'ลบรายการสำเร็จ');
+      if (selectedPO?.id === poId) setSelectedPO(null);
+      loadHistory();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการลบรายการ');
+    }
+  };
+
+  // Clear all PO history and rollback stock
+  const handleClearAllHistory = async () => {
+    if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการเคลียร์ประวัติเอกสารรับเข้าทั้งหมด?\n\n⚠️ คำเตือน: ระบบจะทำการปรับคืนสต็อกสินค้าทั้งหมดที่เคยรับเข้ากลับคืน')) {
+      return;
+    }
+    try {
+      const res = await api.delete('/inventory/purchase-orders');
+      alert(res.data?.message || 'ล้างประวัติการรับเข้าทั้งหมดสำเร็จ');
+      if (selectedPO) setSelectedPO(null);
+      loadHistory();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการล้างประวัติ');
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto">
       {/* Page Header */}
@@ -567,12 +597,13 @@ export default function StockIn() {
                 </div>
                 {items.length > 0 && (
                   <button
+                    type="button"
                     onClick={() => {
-                      if (confirm('ล้างรายการทั้งหมดใช่ไหม?')) setItems([]);
+                      if (confirm('ล้างรายการสินค้าทั้งหมดที่กำลังรับเข้าใช่ไหม?')) setItems([]);
                     }}
-                    className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                    className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
                   >
-                    <Trash2 size={13} /> ล้างรายการ
+                    <Trash2 size={13} /> เคลียร์รายการ
                   </button>
                 )}
               </div>
@@ -817,14 +848,27 @@ export default function StockIn() {
       {/* Tab 2: History */}
       {tab === 'history' && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-bold text-slate-800">ประวัติเอกสารรับสินค้าเข้า (Purchase Orders)</h3>
-            <button
-              onClick={loadHistory}
-              className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-            >
-              <RefreshCw size={13} /> รีเฟรช
-            </button>
+            <div className="flex items-center gap-2">
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAllHistory}
+                  className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
+                  title="ล้างประวัติการรับเข้าทั้งหมดและปรับคืนสต็อก"
+                >
+                  <Trash2 size={13} /> เคลียร์ประวัติทั้งหมด
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={loadHistory}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <RefreshCw size={13} /> รีเฟรช
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
@@ -835,7 +879,7 @@ export default function StockIn() {
                   <th className="px-4 py-3 text-right">มูลค่ารวม</th>
                   <th className="px-4 py-3">หมายเหตุ</th>
                   <th className="px-4 py-3">วันที่รับเข้า</th>
-                  <th className="px-4 py-3 text-center">ดูรายละเอียด</th>
+                  <th className="px-4 py-3 text-center">จัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -850,18 +894,30 @@ export default function StockIn() {
                         {new Date(po.created_at).toLocaleString('th-TH')}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => viewPoDetail(po.id)}
-                          disabled={loadingPOId === po.id}
-                          className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold transition-all inline-flex items-center gap-1 disabled:opacity-50"
-                        >
-                          {loadingPOId === po.id ? (
-                            <Loader2 size={13} className="animate-spin" />
-                          ) : (
-                            <Eye size={13} />
-                          )}
-                          รายการ
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => viewPoDetail(po.id)}
+                            disabled={loadingPOId === po.id}
+                            className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold transition-all inline-flex items-center gap-1 disabled:opacity-50"
+                            title="ดูรายละเอียดสินค้าในบิล"
+                          >
+                            {loadingPOId === po.id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Eye size={13} />
+                            )}
+                            รายการ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePO(po.id, po.po_no)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="ลบ/ยกเลิกเอกสารรับเข้านี้ (ปรับคืนสต็อก)"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1231,6 +1287,15 @@ export default function StockIn() {
                   >
                     <Printer size={14} />
                     พิมพ์ใบรับสินค้าเข้าคลัง
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePO(selectedPO.id, selectedPO.po_no)}
+                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+                    title="ลบเอกสารนี้และปรับคืนสต็อก"
+                  >
+                    <Trash2 size={14} />
+                    ลบเอกสารนี้
                   </button>
                 </div>
               </div>

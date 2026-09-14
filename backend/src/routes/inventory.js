@@ -116,6 +116,67 @@ router.get('/purchase-orders/:id', authenticate, async (req, res) => {
   }
 });
 
+// DELETE /api/inventory/purchase-orders/:id (ลบ/ยกเลิกเอกสารรับเข้า พร้อมปรับคืนสต็อก)
+router.delete('/purchase-orders/:id', authenticate, async (req, res) => {
+  try {
+    const poId = req.params.id;
+    const po = await get('SELECT * FROM purchase_orders WHERE id = ?', [poId]);
+    if (!po) return res.status(404).json({ message: 'ไม่พบเอกสารรับเข้าสินค้า' });
+
+    const items = await all('SELECT * FROM po_items WHERE po_id = ?', [poId]);
+
+    // Revert stock for each item
+    for (const item of items) {
+      const product = await get('SELECT * FROM products WHERE id = ?', [item.product_id]);
+      if (product) {
+        const newStock = Math.max(0, product.stock_qty - item.qty);
+        await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, item.product_id]);
+        await run(
+          `INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note, user_id)
+           VALUES (?, 'OUT', ?, ?, ?, 'po_cancel', ?, ?, ?)`,
+          [item.product_id, item.qty, product.stock_qty, newStock, poId, `ยกเลิก/ลบเอกสารรับเข้า PO: ${po.po_no}`, req.user.id]
+        );
+      }
+    }
+
+    await run('DELETE FROM po_items WHERE po_id = ?', [poId]);
+    await run('DELETE FROM purchase_orders WHERE id = ?', [poId]);
+
+    emitEvent('inventory:updated', { action: 'po_deleted', po_no: po.po_no });
+    emitEvent('dashboard:refresh', { trigger: 'po_deleted' });
+
+    res.json({ message: `ลบเอกสารรับเข้า ${po.po_no} สำเร็จ และปรับคืนสต็อกเรียบร้อยแล้ว` });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/inventory/purchase-orders (ล้างประวัติเอกสารรับเข้าทั้งหมด พร้อมปรับคืนสต็อก)
+router.delete('/purchase-orders', authenticate, async (req, res) => {
+  try {
+    const orders = await all('SELECT * FROM purchase_orders');
+    for (const po of orders) {
+      const items = await all('SELECT * FROM po_items WHERE po_id = ?', [po.id]);
+      for (const item of items) {
+        const product = await get('SELECT * FROM products WHERE id = ?', [item.product_id]);
+        if (product) {
+          const newStock = Math.max(0, product.stock_qty - item.qty);
+          await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, item.product_id]);
+        }
+      }
+      await run('DELETE FROM po_items WHERE po_id = ?', [po.id]);
+    }
+    await run('DELETE FROM purchase_orders');
+
+    emitEvent('inventory:updated', { action: 'po_all_deleted' });
+    emitEvent('dashboard:refresh', { trigger: 'po_all_deleted' });
+
+    res.json({ message: 'ล้างประวัติเอกสารรับเข้าทั้งหมดสำเร็จ และปรับคืนสต็อกเรียบร้อยแล้ว' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /api/inventory/requisitions (เบิกสินค้า)
 router.post('/requisitions', authenticate, async (req, res) => {
   try {
