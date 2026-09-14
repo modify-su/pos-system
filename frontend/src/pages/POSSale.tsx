@@ -635,10 +635,6 @@ export default function POSSale() {
         </div>
       )}
 
-      {/* Barcode Scanner Modal */}
-      {showScanner && (
-        <BarcodeScanner onScan={handleBarcodeResult} onClose={() => setShowScanner(false)} />
-      )}
 
       {/* Checkout Modal */}
       {showCheckout && (

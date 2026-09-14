@@ -943,16 +943,6 @@ export default function StockOut() {
         </div>
       )}
 
-      {/* Barcode Scanner Modal */}
-      {showScanner && (
-        <BarcodeScanner
-          onScan={(code) => {
-            handleBarcode(code);
-            setShowScanner(false);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
 
       {/* Approve Modal */}
       {approving && (
