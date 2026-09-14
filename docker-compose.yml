@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  pos-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pos-system
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - JWT_SECRET=change_this_to_a_long_random_secret_string_in_production
+      - COOKIE_SAMESITE=lax
+      - ALLOWED_ORIGINS=http://localhost:3001,http://localhost:5173
+      - DB_PATH=/app/backend/data/pos.db
+    volumes:
+      # Persistent SQLite database storage
+      - pos-data:/app/backend/data
+      # Persistent uploaded product images
+      - pos-uploads:/app/uploads
+
+volumes:
+  pos-data:
+    driver: local
+  pos-uploads:
+    driver: local
