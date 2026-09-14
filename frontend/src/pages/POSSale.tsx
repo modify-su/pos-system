@@ -7,7 +7,7 @@ import { useRealtimeEvent } from '../utils/socket';
 import {
   Scan, Search, ShoppingCart, Trash2, Plus, Minus,
   CreditCard, Banknote, Smartphone, Printer, Check, X, Receipt,
-  Package, Filter, RefreshCw
+  Package, Filter, RefreshCw, Zap, ArrowRight
 } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 
@@ -51,6 +51,7 @@ export default function POSSale() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
+  const [showChangeModal, setShowChangeModal] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
@@ -165,6 +166,7 @@ export default function POSSale() {
       clearCart();
       setShowCheckout(false);
       setPaymentAmount('');
+      setShowChangeModal(true);
       // Refresh catalog stock
       loadCatalog();
     } catch (err: any) {
@@ -248,6 +250,28 @@ export default function POSSale() {
             );
           })}
         </div>
+
+        {/* Convenience Store Quick Hotkeys (สินค้าขายด่วน) */}
+        {products.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <span className="text-amber-600 font-bold flex items-center gap-1 text-[11px] whitespace-nowrap bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 shadow-2xs">
+              <Zap size={13} className="text-amber-500 fill-amber-500" />
+              <span>ปุ่มด่วนแคชเชียร์:</span>
+            </span>
+            {products.slice(0, 6).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => handleAddToCart(p)}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-lg border border-slate-200 shadow-2xs font-medium whitespace-nowrap transition-all active:scale-95 flex items-center gap-1.5"
+                title={`คลิกเพิ่ม ${p.name}`}
+              >
+                <span className="truncate max-w-[120px]">{p.name}</span>
+                <span className="text-blue-600 font-bold font-mono">฿{p.sell_price}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Error Alert */}
         {error && (
@@ -708,22 +732,30 @@ export default function POSSale() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-4 gap-1.5 mt-3">
-                    {[20, 50, 100, 500, 1000].map((v) => (
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentAmount(getTotal().toFixed(2))}
+                      className="px-2 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs col-span-3 sm:col-span-1 transition-all active:scale-95 shadow-2xs"
+                    >
+                      พอดี (฿{fmt(getTotal())})
+                    </button>
+                    {[
+                      { v: 20, color: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
+                      { v: 50, color: 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100' },
+                      { v: 100, color: 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100' },
+                      { v: 500, color: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
+                      { v: 1000, color: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200' },
+                    ].map((bill) => (
                       <button
-                        key={v}
-                        onClick={() => setPaymentAmount(String(v))}
-                        className="btn-outline btn-sm text-xs py-1.5"
+                        key={bill.v}
+                        type="button"
+                        onClick={() => setPaymentAmount(String(bill.v))}
+                        className={`px-2 py-2.5 rounded-xl border font-bold text-xs font-mono transition-all active:scale-95 shadow-2xs ${bill.color}`}
                       >
-                        +{v}
+                        ฿{bill.v}
                       </button>
                     ))}
-                    <button
-                      onClick={() => setPaymentAmount(getTotal().toFixed(2))}
-                      className="btn-outline btn-sm text-xs col-span-3 bg-slate-100 font-semibold text-blue-600"
-                    >
-                      ชำระพอดี (฿{fmt(getTotal())})
-                    </button>
                   </div>
                 </div>
               )}
@@ -788,15 +820,73 @@ export default function POSSale() {
         </div>
       )}
 
-      {/* Mobile Camera Barcode & QR Scanner Modal */}
+      {/* Mobile Camera Barcode & QR Scanner Modal (Continuous Scan Enabled) */}
       {showScanner && (
         <BarcodeScanner
+          continuous={true}
           onScan={(code) => {
-            setShowScanner(false);
             handleBarcodeResult(code);
           }}
           onClose={() => setShowScanner(false)}
         />
+      )}
+
+      {/* Big Change Display Modal (Convenience Store Cashier Screen) */}
+      {showChangeModal && lastSale && (
+        <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden p-6 text-center space-y-5 animate-in zoom-in-95 duration-200 border border-slate-100">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <Check size={36} strokeWidth={3} />
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">ชำระเงินสำเร็จ</p>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">บิลเลขที่: {lastSale.sale_no}</p>
+            </div>
+
+            {/* Large Change Display Box */}
+            <div className="p-4 bg-emerald-50 border-2 border-emerald-300 rounded-2xl space-y-1.5">
+              <p className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                {lastSale.payment_method === 'cash' ? '💵 เงินทอน' : 'ยอดชำระสำเร็จ'}
+              </p>
+              <p className="text-4xl sm:text-5xl font-black text-emerald-600 font-mono tracking-tight">
+                ฿{fmt(lastSale.payment_method === 'cash' ? lastSale.change_amount : lastSale.total)}
+              </p>
+              {lastSale.payment_method === 'cash' && (
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  รับมา ฿{fmt(lastSale.payment_amount)} • ยอดสุทธิ ฿{fmt(lastSale.total)}
+                </p>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  handlePrint();
+                }}
+                className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
+              >
+                <Printer size={17} />
+                <span>พิมพ์ใบเสร็จ (Print Receipt)</span>
+              </button>
+
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  setShowChangeModal(false);
+                  searchRef.current?.focus();
+                }}
+                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition-all active:scale-95"
+              >
+                <span>เริ่มรายการขายถัดไป (ลูกค้ารายใหม่)</span>
+                <ArrowRight size={17} />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

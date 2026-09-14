@@ -166,6 +166,8 @@ export default function StockIn() {
     } catch {
       // Product not found with this barcode
       setNotFoundBarcode(trimmed);
+      setShowScanner(false);
+      openNewProductModal(trimmed);
     }
   };
 
@@ -703,16 +705,23 @@ export default function StockIn() {
                                 </button>
                               </div>
 
-                              {/* Quick Step Buttons (+5, +10, +50, +100) */}
-                              <div className="flex items-center gap-1">
-                                {[5, 10, 50, 100].map((step) => (
+                               {/* Convenience Store Pack & Carton Multipliers */}
+                              <div className="flex flex-wrap items-center justify-center gap-1 max-w-[200px]">
+                                {[
+                                  { label: '+6 แพ็ค', step: 6 },
+                                  { label: '+12 โหล', step: 12 },
+                                  { label: '+24 ลัง', step: 24 },
+                                  { label: '+50', step: 50 },
+                                  { label: '+100', step: 100 },
+                                ].map((btn) => (
                                   <button
-                                    key={step}
+                                    key={btn.step}
                                     type="button"
-                                    onClick={() => adjustQty(idx, step)}
-                                    className="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded border border-slate-200 transition-all active:scale-95"
+                                    onClick={() => adjustQty(idx, btn.step)}
+                                    className="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 rounded-md border border-slate-200 transition-all active:scale-95 shadow-2xs"
+                                    title={`เพิ่ม ${btn.step} ชิ้น`}
                                   >
-                                    +{step}
+                                    {btn.label}
                                   </button>
                                 ))}
                               </div>
@@ -1481,11 +1490,11 @@ export default function StockIn() {
         />
       )}
 
-      {/* Camera Barcode Scanner Modal */}
+      {/* Camera Barcode Scanner Modal (Continuous Scan Enabled) */}
       {showScanner && (
         <BarcodeScanner
+          continuous={true}
           onScan={(code) => {
-            setShowScanner(false);
             handleBarcodeLookup(code);
           }}
           onClose={() => setShowScanner(false)}

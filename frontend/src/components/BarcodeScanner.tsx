@@ -3,10 +3,14 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   Camera, X, Scan, Zap, ZapOff, RefreshCw,
   Image as ImageIcon, Keyboard, CheckCircle2,
-  AlertCircle, Video, Smartphone, Monitor, Tablet,
+  AlertCircle, Video, Smartphone, Monitor, Tablet, Check
 } from 'lucide-react';
 
-interface Props { onScan: (barcode: string) => void; onClose: () => void; }
+interface Props {
+  onScan: (barcode: string) => void;
+  onClose: () => void;
+  continuous?: boolean;
+}
 interface CameraDevice { id: string; label: string; }
 
 function detectDevice(): 'mobile' | 'tablet' | 'desktop' {
@@ -79,7 +83,7 @@ function sampleBrightness(): number {
   } catch { return 255; }
 }
 
-export default function BarcodeScanner({ onScan, onClose }: Props) {
+export default function BarcodeScanner({ onScan, onClose, continuous = false }: Props) {
   const isMountedRef = useRef(true);
   const isStartingRef = useRef(false);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
@@ -87,6 +91,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const activeCameraIdRef = useRef<string>('');
   const fileCaptureInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const lastScanRef = useRef<{ code: string; time: number } | null>(null);
 
   const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
@@ -101,15 +106,42 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const [processingFile, setProcessingFile] = useState(false);
   const [isBlackFrame, setIsBlackFrame] = useState(false);
 
+  // Continuous Scan Mode (Convenience Store Style)
+  const [isContinuous, setIsContinuous] = useState(continuous);
+  const [continuousCount, setContinuousCount] = useState(0);
+  const [lastScannedItem, setLastScannedItem] = useState<string | null>(null);
+  const [scanFeedbackFlash, setScanFeedbackFlash] = useState(false);
+
   const deviceType = detectDevice();
   const inApp = isInAppBrowser();
 
   const handleSuccess = useCallback((code: string) => {
-    const clean = code.trim(); if (!clean) return;
-    setScannedResult(clean); playScanFeedback();
+    const clean = code.trim();
+    if (!clean) return;
+
+    if (isContinuous) {
+      const now = Date.now();
+      // Debounce: ignore same code if scanned within 900ms
+      if (lastScanRef.current && lastScanRef.current.code === clean && (now - lastScanRef.current.time < 900)) {
+        return;
+      }
+      lastScanRef.current = { code: clean, time: now };
+      setContinuousCount((prev) => prev + 1);
+      setLastScannedItem(clean);
+      setScanFeedbackFlash(true);
+      playScanFeedback();
+      onScan(clean);
+      setTimeout(() => {
+        if (isMountedRef.current) setScanFeedbackFlash(false);
+      }, 750);
+      return;
+    }
+
+    setScannedResult(clean);
+    playScanFeedback();
     if (html5QrCodeRef.current?.isScanning) html5QrCodeRef.current.stop().catch(() => {});
     setTimeout(() => { onScan(clean); onClose(); }, 450);
-  }, [onScan, onClose]);
+  }, [isContinuous, onScan, onClose]);
 
   const forceStopCamera = useCallback(async () => {
     try {
@@ -345,6 +377,43 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
           </div>
         </div>
 
+        {/* Convenience Store Continuous Scan Switch */}
+        <div className="bg-slate-100/90 px-4 py-2 border-b flex items-center justify-between gap-2 flex-shrink-0 text-xs">
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="text-amber-500">⚡</span>
+            <span>โหมดสแกน:</span>
+          </div>
+          <div className="flex bg-slate-200/90 p-0.5 rounded-xl text-xs">
+            <button
+              type="button"
+              onClick={() => setIsContinuous(true)}
+              className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                isContinuous
+                  ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>สแกนต่อเนื่อง (สะดวกซื้อ)</span>
+              {isContinuous && continuousCount > 0 && (
+                <span className="bg-emerald-800 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                  {continuousCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsContinuous(false)}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                !isContinuous
+                  ? 'bg-white text-slate-800 shadow-sm font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              สแกนทีละชิ้น
+            </button>
+          </div>
+        </div>
+
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           {activeTab === 'camera' ? (
@@ -447,7 +516,21 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                   </div>
                 )}
 
-                {scannedResult && (
+                {/* Continuous Scan Flash Notification */}
+                {isContinuous && scanFeedbackFlash && (
+                  <div className="absolute inset-x-3 top-3 bg-emerald-600/95 text-white px-3.5 py-2.5 rounded-xl shadow-xl flex items-center justify-between text-xs font-semibold z-30 animate-scaleIn border border-emerald-400">
+                    <span className="flex items-center gap-2 truncate">
+                      <CheckCircle2 size={18} className="text-emerald-200 flex-shrink-0 animate-bounce" />
+                      <span className="truncate">สแกนสำเร็จ: <b className="font-mono text-sm">{lastScannedItem}</b> (+1)</span>
+                    </span>
+                    <span className="bg-emerald-800 text-white text-[11px] px-2 py-0.5 rounded-full font-mono flex-shrink-0 ml-2">
+                      ชิ้นที่ {continuousCount}
+                    </span>
+                  </div>
+                )}
+
+                {/* Single Scan Overlay */}
+                {!isContinuous && scannedResult && (
                   <div className="absolute inset-0 bg-green-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center z-30 animate-scaleIn">
                     <CheckCircle2 size={46} className="text-green-300 animate-bounce" />
                     <p className="text-xs uppercase tracking-wider text-green-200">สแกนสำเร็จ</p>
@@ -550,6 +633,17 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
         {/* Bottom */}
         <div className="p-3 bg-slate-50 border-t flex-shrink-0 flex flex-col gap-2">
+          {isContinuous && (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer"
+            >
+              <Check size={18} />
+              เสร็จสิ้นการสแกน {continuousCount > 0 ? `(บันทึกแล้ว ${continuousCount} ครั้ง)` : ''}
+            </button>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => fileCaptureInputRef.current?.click()}
               className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-sm">
@@ -567,7 +661,9 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
           >
             <X size={15} /> ปิดหน้าต่างสแกน
           </button>
-          <p className="text-[11px] text-center text-slate-500">รองรับ EAN-13, Code-128, QR Code ทุกรูปแบบ</p>
+          <p className="text-[11px] text-center text-slate-500">
+            {isContinuous ? '⚡ โหมดสแกนต่อเนื่อง: ยิงบาร์โค้ดได้เรื่อยๆ ไม่ต้องปิดกล้อง' : 'รองรับ EAN-13, Code-128, QR Code ทุกรูปแบบ'}
+          </p>
         </div>
       </div>
 

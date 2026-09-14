@@ -1297,11 +1297,11 @@ export default function StockOut() {
         />
       )}
 
-      {/* Camera Barcode & QR Scanner Modal */}
+      {/* Camera Barcode & QR Scanner Modal (Continuous Scan Enabled) */}
       {showScanner && (
         <BarcodeScanner
+          continuous={true}
           onScan={(code) => {
-            setShowScanner(false);
             handleBarcode(code);
           }}
           onClose={() => setShowScanner(false)}
