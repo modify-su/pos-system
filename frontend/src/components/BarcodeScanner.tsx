@@ -14,7 +14,8 @@ import {
   Keyboard,
   CheckCircle2,
   AlertCircle,
-  Video
+  Video,
+  Smartphone
 } from 'lucide-react';
 
 interface Props {
@@ -84,6 +85,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
   const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
+  const [mobileFacing, setMobileFacing] = useState<'environment' | 'user'>('environment');
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [isCameraStarting, setIsCameraStarting] = useState(true);
@@ -92,6 +94,8 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<'camera' | 'manual'>('camera');
   const [manualCode, setManualCode] = useState('');
   const [processingFile, setProcessingFile] = useState(false);
+
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
   // Handle successful scan
   const handleSuccess = useCallback((code: string) => {
@@ -138,7 +142,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   }, []);
 
   // Start live camera
-  const startCamera = useCallback(async (preferredCameraId?: string) => {
+  const startCamera = useCallback(async (preferredCameraId?: string, preferredFacing?: 'environment' | 'user') => {
     if (isStartingRef.current) return;
     isStartingRef.current = true;
 
@@ -157,89 +161,97 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     }
 
     try {
-      // 1. Discover available cameras
-      let camList = availableCamerasRef.current;
-      if (camList.length === 0) {
-        try {
-          if (navigator.mediaDevices?.getUserMedia) {
-            const probe = await navigator.mediaDevices.getUserMedia({ video: true });
-            probe.getTracks().forEach((t) => t.stop());
-          }
-        } catch {
-          // Probe may fail if permission denied
-        }
-
-        try {
-          const rawCams = await Html5Qrcode.getCameras();
-          if (rawCams && rawCams.length > 0) {
-            camList = rawCams.map((c, idx) => ({
-              id: c.id,
-              label: c.label || `กล้อง ${idx + 1}`,
-            }));
-            availableCamerasRef.current = camList;
-            if (isMountedRef.current) {
-              setAvailableCameras(camList);
-            }
-          }
-        } catch {
-          camList = [];
-        }
-      }
-
-      // 2. Determine target camera ID
-      let targetId = preferredCameraId || activeCameraIdRef.current;
-      if (!targetId && camList.length > 0) {
-        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-        if (isMobile) {
-          // Rear camera for mobile
-          const back = camList.find((c) =>
-            /back|rear|environment|หลัง/i.test(c.label)
-          ) || camList[camList.length - 1];
-          targetId = back.id;
-        } else {
-          // Primary camera for PC / laptop
-          targetId = camList[0].id;
-        }
-      }
-
-      if (targetId) {
-        activeCameraIdRef.current = targetId;
-        if (isMountedRef.current) {
-          setActiveCameraId(targetId);
-        }
-      }
-
-      // 3. Initialize Html5Qrcode scanner
       const scanner = new Html5Qrcode('qr-reader-viewport', {
         formatsToSupport: SUPPORTED_FORMATS,
         verbose: false,
       });
       html5QrCodeRef.current = scanner;
 
-      // Scan full frame (without restricting qrbox to avoid shaded border overlay)
       const scanConfig = {
         fps: 15,
       };
 
-      // 4. Start scanner with camera ID or fallback facingMode
-      if (targetId) {
-        await scanner.start(
-          targetId,
-          scanConfig,
-          (decodedText) => handleSuccess(decodedText),
-          () => {}
-        );
+      if (isMobile) {
+        // ON MOBILE PHONES (iOS Safari, Android Chrome):
+        // Standard facingMode: 'environment' (back camera) or 'user' (front camera)
+        // This avoids deviceId constraint bugs on iPhones/iPads
+        const facingToUse = preferredFacing || mobileFacing;
+        try {
+          await scanner.start(
+            { facingMode: facingToUse },
+            scanConfig,
+            (decodedText) => handleSuccess(decodedText),
+            () => {}
+          );
+        } catch (mobileErr) {
+          console.warn('Mobile facingMode start failed, trying fallback...', mobileErr);
+          const fallbackFacing = facingToUse === 'environment' ? 'user' : 'environment';
+          await scanner.start(
+            { facingMode: fallbackFacing },
+            scanConfig,
+            (decodedText) => handleSuccess(decodedText),
+            () => {}
+          );
+          if (isMountedRef.current) {
+            setMobileFacing(fallbackFacing);
+          }
+        }
       } else {
-        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-        await scanner.start(
-          { facingMode: isMobile ? 'environment' : 'user' },
-          scanConfig,
-          (decodedText) => handleSuccess(decodedText),
-          () => {}
-        );
+        // ON DESKTOP / PC / LAPTOP:
+        // Discover available cameras and allow choosing Camera 1 (USB/IR) vs Camera 2 (RGB)
+        let camList = availableCamerasRef.current;
+        if (camList.length === 0) {
+          try {
+            if (navigator.mediaDevices?.getUserMedia) {
+              const probe = await navigator.mediaDevices.getUserMedia({ video: true });
+              probe.getTracks().forEach((t) => t.stop());
+            }
+          } catch {}
+
+          try {
+            const rawCams = await Html5Qrcode.getCameras();
+            if (rawCams && rawCams.length > 0) {
+              camList = rawCams.map((c, idx) => ({
+                id: c.id,
+                label: c.label || `กล้อง ${idx + 1}`,
+              }));
+              availableCamerasRef.current = camList;
+              if (isMountedRef.current) {
+                setAvailableCameras(camList);
+              }
+            }
+          } catch {
+            camList = [];
+          }
+        }
+
+        let targetId = preferredCameraId || activeCameraIdRef.current;
+        if (!targetId && camList.length > 0) {
+          targetId = camList[0].id;
+        }
+
+        if (targetId) {
+          activeCameraIdRef.current = targetId;
+          if (isMountedRef.current) {
+            setActiveCameraId(targetId);
+          }
+          await scanner.start(
+            targetId,
+            scanConfig,
+            (decodedText) => handleSuccess(decodedText),
+            () => {}
+          );
+        } else {
+          await scanner.start(
+            { facingMode: 'user' },
+            scanConfig,
+            (decodedText) => handleSuccess(decodedText),
+            () => {}
+          );
+        }
       }
 
-      // 5. Check if torch is supported
+      // Check if torch is supported
       try {
         const stream = (document.querySelector('#qr-reader-viewport video') as HTMLVideoElement)?.srcObject as MediaStream;
         const track = stream?.getVideoTracks()[0];
@@ -257,13 +269,13 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       if (isLineOrInApp) {
         msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "ถ่ายรูปสแกน" ด้านล่างนี้';
       } else if (!isSecure) {
-        msg = 'กล้องสดถูกจำกัดโดยระบบความปลอดภัยของเบราว์เซอร์ (ต้องใช้ HTTPS หรือ localhost) — สามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที';
+        msg = 'กล้องสดบนมือถือถูกจำกัดโดยระบบความปลอดภัย (ต้องใช้ HTTPS) — สามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที';
       } else if (err && typeof err === 'object' && 'name' in err) {
         const errName = (err as { name: string }).name;
         if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
           msg = 'กรุณากดอนุญาต (Allow) สิทธิ์การเข้าถึงกล้องถ่ายรูปในการตั้งค่าเบราว์เซอร์';
         } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
-          msg = 'กล้องกำลังถูกใช้งานโดยโปรแกรมอื่น (เช่น Zoom, Meet, Line) กรุณาปิดโปรแกรมอื่นแล้วลองใหม่';
+          msg = 'กล้องกำลังถูกใช้งานโดยโปรแกรมอื่น กรุณาปิดแอปอื่นแล้วลองใหม่';
         }
       }
       setCameraError(msg);
@@ -273,17 +285,24 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         setIsCameraStarting(false);
       }
     }
-  }, [forceStopCamera, handleSuccess]);
+  }, [forceStopCamera, handleSuccess, isMobile, mobileFacing]);
 
-  // Switch to specific camera ID
+  // Switch to specific camera ID (Desktop)
   const switchCameraTo = useCallback(async (newCameraId: string) => {
     activeCameraIdRef.current = newCameraId;
     setActiveCameraId(newCameraId);
     await startCamera(newCameraId);
   }, [startCamera]);
 
-  // Switch to next camera in list
+  // Switch camera toggle (Mobile toggles back/front, Desktop cycles devices)
   const switchCamera = useCallback(async () => {
+    if (isMobile) {
+      const nextFacing = mobileFacing === 'environment' ? 'user' : 'environment';
+      setMobileFacing(nextFacing);
+      await startCamera(undefined, nextFacing);
+      return;
+    }
+
     const cams = availableCamerasRef.current;
     if (cams.length <= 1) {
       await startCamera();
@@ -294,7 +313,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     const nextIdx = currIdx >= 0 ? (currIdx + 1) % cams.length : 1;
     const nextCam = cams[nextIdx];
     await switchCameraTo(nextCam.id);
-  }, [startCamera, switchCameraTo]);
+  }, [isMobile, mobileFacing, startCamera, switchCameraTo]);
 
   // Toggle Torch/Flashlight
   const toggleTorch = async () => {
@@ -352,7 +371,11 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     };
   }, [activeTab]);
 
-  const activeCamLabel = availableCameras.find((c) => c.id === activeCameraId)?.label;
+  const activeCamLabel = isMobile
+    ? mobileFacing === 'environment'
+      ? 'กล้องหลัง (Rear Camera)'
+      : 'กล้องหน้า (Front Camera)'
+    : availableCameras.find((c) => c.id === activeCameraId)?.label;
 
   return (
     <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-3 backdrop-blur-xs animate-fadeIn">
@@ -434,8 +457,8 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
           {activeTab === 'camera' ? (
             <div className="relative">
-              {/* Camera Selector Bar if multiple cameras detected */}
-              {availableCameras.length > 1 && (
+              {/* Desktop Camera Selector Bar if multiple cameras detected */}
+              {!isMobile && availableCameras.length > 1 && (
                 <div className="flex items-center gap-2 mb-2 p-1.5 bg-slate-100 rounded-xl border border-slate-200">
                   <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 pl-1 flex-shrink-0">
                     <Video size={14} className="text-blue-600" />
@@ -459,6 +482,23 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                     title="สลับเป็นกล้องอีกตัว"
                   >
                     <RefreshCw size={12} /> สลับกล้อง
+                  </button>
+                </div>
+              )}
+
+              {/* Mobile Quick Bar for Front/Back Camera */}
+              {isMobile && (
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <span className="text-xs text-slate-600 flex items-center gap-1">
+                    <Smartphone size={14} className="text-blue-600" />
+                    <span>โหมดมือถือ: <b>{mobileFacing === 'environment' ? 'กล้องหลัง' : 'กล้องหน้า'}</b></span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={switchCamera}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition-all"
+                  >
+                    <RefreshCw size={12} /> สลับกล้องหน้า/หลัง
                   </button>
                 </div>
               )}
@@ -531,19 +571,14 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                       </button>
                     )}
 
-                    {availableCameras.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={switchCamera}
-                        className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md flex items-center gap-1 text-xs"
-                        title="สลับกล้อง"
-                      >
-                        <RefreshCw size={17} />
-                        <span className="text-[10px] font-mono px-0.5">
-                          {availableCameras.findIndex((c) => c.id === activeCameraId) + 1}/{availableCameras.length}
-                        </span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={switchCamera}
+                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md flex items-center gap-1 text-xs"
+                      title="สลับกล้อง"
+                    >
+                      <RefreshCw size={17} />
+                    </button>
                   </div>
                 )}
 
@@ -559,31 +594,26 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                 )}
               </div>
 
-              {/* Helpful Troubleshooting for Black Screen */}
+              {/* Troubleshooting Tips */}
               <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1.5 shadow-xs">
                 <div className="font-semibold flex items-center justify-between text-amber-950">
                   <span className="flex items-center gap-1.5">
-                    💡 <span>ทำไมภาพถึงเป็นสีดำ? (วิธีแก้ไข):</span>
+                    💡 <span>หากภาพกล้องเป็นสีดำ:</span>
                   </span>
                   <button
                     type="button"
-                    onClick={() => startCamera(activeCameraIdRef.current)}
+                    onClick={() => startCamera()}
                     className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 text-[11px]"
                   >
                     <RefreshCw size={12} /> รีสตาร์ทกล้อง
                   </button>
                 </div>
                 <ul className="list-disc list-inside space-y-1 text-[11px] text-amber-800">
-                  {availableCameras.length > 1 && (
-                    <li>
-                      <b>ลองสลับกล้อง</b>: กดเลือก <b>กล้อง 2</b> ในเมนูด้านบน (โน้ตบุ๊กบางรุ่นแยกกล้องปกติกับกล้อง IR อินฟราเรด)
-                    </li>
-                  )}
                   <li>
-                    <b>กดปุ่มเปิดกล้องที่คีย์บอร์ด</b>: โน้ตบุ๊ก (ASUS / Lenovo / MSI) ให้กด <b>Fn + F10</b> เพื่อเปิดฮาร์ดแวร์กล้อง
+                    <b>บนมือถือ</b>: สามารถแตะปุ่มสีน้ำเงิน <b>"ถ่ายรูปสแกน"</b> ด้านล่าง เพื่อถ่ายภาพสแกนบาร์โค้ดได้ทันที 100%
                   </li>
                   <li>
-                    <b>เปิดฝาสไลด์หน้ากล้อง</b>: ตรวจดูแถบสไลด์สีส้ม/ดำเหนือจอภาพว่าไม่ได้เลื่อนปิดบังหน้าเลนส์
+                    <b>บนโน้ตบุ๊ก</b>: ให้กดปุ่ม <b>Fn + F10</b> (หรือปุ่มไอคอนกล้องบนคีย์บอร์ด) และตรวจดูฝาสไลด์ปิดเลนส์
                   </li>
                 </ul>
               </div>
