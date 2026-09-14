@@ -13,12 +13,18 @@ import {
   Image as ImageIcon,
   Keyboard,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Video
 } from 'lucide-react';
 
 interface Props {
   onScan: (barcode: string) => void;
   onClose: () => void;
+}
+
+interface CameraDevice {
+  id: string;
+  label: string;
 }
 
 // All standard 1D and 2D barcode / QR code formats
@@ -67,11 +73,14 @@ function playScanFeedback() {
 }
 
 export default function BarcodeScanner({ onScan, onClose }: Props) {
+  const isMountedRef = useRef(true);
+  const isStartingRef = useRef(false);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const fileCaptureInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
+  const [activeCameraId, setActiveCameraId] = useState<string>('');
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [isCameraStarting, setIsCameraStarting] = useState(true);
@@ -99,8 +108,8 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     }, 450);
   }, [onScan, onClose]);
 
-  // Stop camera helper
-  const stopCamera = useCallback(async () => {
+  // Completely stop camera and release hardware tracks
+  const forceStopCamera = useCallback(async () => {
     try {
       if (html5QrCodeRef.current) {
         if (html5QrCodeRef.current.isScanning) {
@@ -112,16 +121,89 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     } catch {
       // Ignore cleanup error
     }
+
+    try {
+      const video = document.querySelector('#qr-reader-viewport video') as HTMLVideoElement;
+      if (video && video.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach((t) => t.stop());
+        video.srcObject = null;
+      }
+    } catch {
+      // Ignore video cleanup error
+    }
   }, []);
 
   // Start live camera
-  const startCamera = useCallback(async (facing: 'environment' | 'user') => {
-    await stopCamera();
+  const startCamera = useCallback(async (preferredCameraId?: string) => {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     setCameraError(null);
     setIsCameraStarting(true);
     setTorchOn(false);
 
+    // Stop previous instance before starting new one
+    await forceStopCamera();
+
+    // Small delay to allow operating system to release camera hardware
+    await new Promise((r) => setTimeout(r, 120));
+    if (!isMountedRef.current) {
+      isStartingRef.current = false;
+      return;
+    }
+
     try {
+      // 1. Discover available cameras
+      let camList = availableCameras;
+      if (camList.length === 0) {
+        try {
+          // Probe stream to request permission and populate device labels
+          if (navigator.mediaDevices?.getUserMedia) {
+            const probe = await navigator.mediaDevices.getUserMedia({ video: true });
+            probe.getTracks().forEach((t) => t.stop());
+          }
+        } catch {
+          // Continue to enumerate
+        }
+
+        try {
+          const rawCams = await Html5Qrcode.getCameras();
+          if (rawCams && rawCams.length > 0) {
+            camList = rawCams.map((c, idx) => ({
+              id: c.id,
+              label: c.label || `กล้อง ${idx + 1}`,
+            }));
+            if (isMountedRef.current) {
+              setAvailableCameras(camList);
+            }
+          }
+        } catch {
+          camList = [];
+        }
+      }
+
+      // 2. Determine target camera ID
+      let targetId = preferredCameraId || activeCameraId;
+      if (!targetId && camList.length > 0) {
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        if (isMobile) {
+          // Pick rear/back camera for mobile
+          const back = camList.find((c) =>
+            /back|rear|environment|หลัง/i.test(c.label)
+          ) || camList[camList.length - 1];
+          targetId = back.id;
+        } else {
+          // Pick primary camera for laptop/desktop
+          targetId = camList[0].id;
+        }
+      }
+
+      if (targetId && isMountedRef.current) {
+        setActiveCameraId(targetId);
+      }
+
+      // 3. Initialize Html5Qrcode scanner
       const scanner = new Html5Qrcode('qr-reader-viewport', {
         formatsToSupport: SUPPORTED_FORMATS,
         verbose: false,
@@ -137,43 +219,25 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         },
       };
 
-      try {
-        // Attempt 1: Facing mode (environment / user) without rigid aspect ratio
+      // 4. Start scanner with camera ID or fallback facingMode
+      if (targetId) {
         await scanner.start(
-          { facingMode: facing },
+          targetId,
           scanConfig,
-          (decodedText) => {
-            handleSuccess(decodedText);
-          },
-          () => {
-            // Ignored per-frame decode failure
-          }
+          (decodedText) => handleSuccess(decodedText),
+          () => {}
         );
-      } catch (firstErr) {
-        console.warn('FacingMode camera start failed, trying getCameras fallback...', firstErr);
-        // Attempt 2: Enumerate cameras and pick back camera ID
-        const cameras = await Html5Qrcode.getCameras();
-        if (!cameras || cameras.length === 0) {
-          throw firstErr;
-        }
-        const backCamera =
-          cameras.find((c) =>
-            c.label.toLowerCase().includes('back') ||
-            c.label.toLowerCase().includes('rear') ||
-            c.label.toLowerCase().includes('environment')
-          ) || cameras[cameras.length - 1];
-
+      } else {
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         await scanner.start(
-          backCamera.id,
+          { facingMode: isMobile ? 'environment' : 'user' },
           scanConfig,
-          (decodedText) => {
-            handleSuccess(decodedText);
-          },
+          (decodedText) => handleSuccess(decodedText),
           () => {}
         );
       }
 
-      // Check if torch/flashlight is supported
+      // 5. Check if torch is supported
       try {
         const stream = (document.querySelector('#qr-reader-viewport video') as HTMLVideoElement)?.srcObject as MediaStream;
         const track = stream?.getVideoTracks()[0];
@@ -186,19 +250,28 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       console.warn('Camera start error:', err);
       let msg = 'ไม่สามารถเปิดกล้องสดได้';
       const isLineOrInApp = /Line|FBAN|FBAV|Instagram|Messenger/i.test(navigator.userAgent);
+      const isSecure = window.isSecureContext !== false;
 
       if (isLineOrInApp) {
-        msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "📸 ถ่ายรูปสแกน" ด้านล่างนี้ได้ทันทีครับ';
-      } else if (window.isSecureContext === false) {
-        msg = 'กล้องสดบนมือถือถูกจำกัดโดยระบบความปลอดภัยของเบราว์เซอร์ (ต้องใช้ HTTPS) — คุณสามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที 100%';
-      } else if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'NotAllowedError') {
-        msg = 'กรุณากดอนุญาต (Allow) สิทธิ์การเข้าถึงกล้องถ่ายรูปในการตั้งค่าเบราว์เซอร์มือถือ';
+        msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "ถ่ายรูปสแกน" ด้านล่างนี้ได้ทันที';
+      } else if (!isSecure) {
+        msg = 'กล้องสดถูกจำกัดโดยระบบความปลอดภัยของเบราว์เซอร์ (ต้องใช้ HTTPS หรือ localhost) — สามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที';
+      } else if (err && typeof err === 'object' && 'name' in err) {
+        const errName = (err as { name: string }).name;
+        if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+          msg = 'กรุณากดอนุญาต (Allow) สิทธิ์การเข้าถึงกล้องถ่ายรูปในการตั้งค่าเบราว์เซอร์';
+        } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+          msg = 'กล้องกำลังถูกใช้งานโดยโปรแกรมอื่น (เช่น Zoom, Meet, Line) กรุณาปิดโปรแกรมอื่นแล้วลองใหม่';
+        }
       }
       setCameraError(msg);
     } finally {
-      setIsCameraStarting(false);
+      isStartingRef.current = false;
+      if (isMountedRef.current) {
+        setIsCameraStarting(false);
+      }
     }
-  }, [handleSuccess, stopCamera]);
+  }, [activeCameraId, availableCameras, forceStopCamera, handleSuccess]);
 
   // Toggle Torch/Flashlight
   const toggleTorch = async () => {
@@ -216,11 +289,18 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     }
   };
 
-  // Switch between front and rear cameras
+  // Switch between cameras (cycles through all available cameras)
   const switchCamera = () => {
-    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
-    setFacingMode(nextFacing);
-    startCamera(nextFacing);
+    if (availableCameras.length <= 1) {
+      // Toggle front/back fallback
+      startCamera();
+      return;
+    }
+    const currIdx = availableCameras.findIndex((c) => c.id === activeCameraId);
+    const nextIdx = (currIdx + 1) % availableCameras.length;
+    const nextCam = availableCameras[nextIdx];
+    setActiveCameraId(nextCam.id);
+    startCamera(nextCam.id);
   };
 
   // Handle image upload / camera snap photo scan
@@ -247,18 +327,23 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     }
   };
 
-  // Initialize camera on mount
+  // Initialize camera on mount and cleanup on unmount
   useEffect(() => {
+    isMountedRef.current = true;
+
     if (activeTab === 'camera') {
-      startCamera(facingMode);
+      startCamera();
     } else {
-      stopCamera();
+      forceStopCamera();
     }
 
     return () => {
-      stopCamera();
+      isMountedRef.current = false;
+      forceStopCamera();
     };
   }, [activeTab]);
+
+  const activeCamLabel = availableCameras.find((c) => c.id === activeCameraId)?.label;
 
   return (
     <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-3 backdrop-blur-xs animate-fadeIn">
@@ -326,7 +411,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
             <button
               onClick={() => {
-                stopCamera();
+                forceStopCamera();
                 onClose();
               }}
               className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
@@ -340,13 +425,17 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
           {activeTab === 'camera' ? (
             <div className="relative">
-              {/* Scanner Viewport */}
-              <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] flex items-center justify-center border-2 border-slate-700 shadow-inner">
-                <div id="qr-reader-viewport" className="w-full h-full object-cover" />
+              {/* Scanner Viewport Box */}
+              <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] border-2 border-slate-700 shadow-inner flex items-center justify-center">
+                <div
+                  id="qr-reader-viewport"
+                  className="w-full h-full"
+                  style={{ width: '100%', height: '100%', minHeight: '240px' }}
+                />
 
                 {/* Laser scan line & target frame animation */}
                 {!cameraError && !isCameraStarting && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
                     {/* Viewfinder Reticle */}
                     <div className="w-[82%] h-[68%] border-2 border-blue-400/80 rounded-xl relative shadow-[0_0_20px_rgba(59,130,246,0.3)]">
                       {/* 4 Corner Markers */}
@@ -361,9 +450,19 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                   </div>
                 )}
 
+                {/* Active Camera Badge */}
+                {!cameraError && !isCameraStarting && activeCamLabel && (
+                  <div className="absolute bottom-2 left-2 z-10 pointer-events-none">
+                    <span className="text-[10px] text-slate-200 bg-black/60 px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur-xs">
+                      <Video size={10} className="text-blue-400" />
+                      <span className="truncate max-w-[160px]">{activeCamLabel}</span>
+                    </span>
+                  </div>
+                )}
+
                 {/* Loading state */}
                 {isCameraStarting && !cameraError && (
-                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center">
+                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center z-20">
                     <RefreshCw size={32} className="animate-spin text-blue-400" />
                     <p className="text-sm font-medium">กำลังเปิดกล้องถ่ายรูป...</p>
                     <p className="text-xs text-slate-400">กรุณากดอนุญาต (Allow) หากระบบถามการเข้าถึงกล้อง</p>
@@ -372,7 +471,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
                 {/* Processing photo file indicator */}
                 {processingFile && (
-                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center z-10">
+                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center z-20">
                     <RefreshCw size={32} className="animate-spin text-green-400" />
                     <p className="text-sm font-medium">กำลังถอดรหัสบาร์โค้ดจากภาพ...</p>
                   </div>
@@ -380,7 +479,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
                 {/* Camera controls overlay (Torch & Switch camera) */}
                 {!cameraError && !isCameraStarting && (
-                  <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+                  <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
                     {hasTorch && (
                       <button
                         type="button"
@@ -397,17 +496,22 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                     <button
                       type="button"
                       onClick={switchCamera}
-                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md"
-                      title="สลับกล้องหน้า/หลัง"
+                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-md flex items-center gap-1 text-xs"
+                      title="สลับกล้อง / ลองกล้องอื่น"
                     >
-                      <RefreshCw size={18} />
+                      <RefreshCw size={17} />
+                      {availableCameras.length > 1 && (
+                        <span className="text-[10px] font-mono px-0.5">
+                          {availableCameras.findIndex((c) => c.id === activeCameraId) + 1}/{availableCameras.length}
+                        </span>
+                      )}
                     </button>
                   </div>
                 )}
 
                 {/* Success feedback overlay */}
                 {scannedResult && (
-                  <div className="absolute inset-0 bg-green-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center animate-scaleIn z-20">
+                  <div className="absolute inset-0 bg-green-900/90 flex flex-col items-center justify-center text-white gap-2 p-4 text-center animate-scaleIn z-30">
                     <CheckCircle2 size={48} className="text-green-300 animate-bounce" />
                     <p className="text-xs uppercase tracking-wider text-green-200">สแกนสำเร็จ</p>
                     <p className="text-lg font-mono font-bold bg-white/20 px-3 py-1 rounded-lg break-all">
@@ -417,15 +521,35 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                 )}
               </div>
 
+              {/* Helpful Notice & Black Screen Tips */}
+              <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="flex items-center gap-1">
+                  💡 หากภาพจอดำ: ตรวจสอบฝาเลื่อนปิดกล้อง (Shutter)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => startCamera()}
+                  className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                >
+                  <RefreshCw size={12} /> รีสตาร์ทกล้อง
+                </button>
+              </div>
+
               {/* Error Notice & Mobile Help */}
               {cameraError && (
-                <div className="mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5 shadow-xs">
+                <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5 shadow-xs">
                   <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-semibold text-amber-950 mb-0.5">{cameraError}</p>
-                    <p className="text-amber-800 text-[11px] leading-relaxed">
-                      💡 แนะนำ: ใช้ปุ่ม <b>"📸 ถ่ายรูปสแกน"</b> ด้านล่าง ซึ่งทำงานร่วมกับกล้องมือถือได้ 100% ทุกระบบปฏิบัติการ (iOS / Android)
-                    </p>
+                  <div className="flex-1 space-y-1.5">
+                    <p className="font-semibold text-amber-950">{cameraError}</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startCamera()}
+                        className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-semibold rounded-lg text-xs transition-all"
+                      >
+                        ลองใหม่อีกครั้ง
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -487,7 +611,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
               className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
             >
               <Camera size={16} />
-              <span>📸 ถ่ายรูปสแกน</span>
+              <span>ถ่ายรูปสแกน</span>
             </button>
 
             {/* Gallery Upload */}
@@ -507,7 +631,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         </div>
       </div>
 
-      {/* Internal CSS for laser beam scanner animation */}
+      {/* Internal CSS for laser beam scanner animation & video layout */}
       <style>{`
         @keyframes scanBeamAnim {
           0% { top: 12%; opacity: 0.6; }
@@ -517,10 +641,26 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         .scan-beam-line {
           animation: scanBeamAnim 2.2s ease-in-out infinite;
         }
+        #qr-reader-viewport {
+          width: 100% !important;
+          height: 100% !important;
+          position: relative !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          overflow: hidden !important;
+        }
         #qr-reader-viewport video {
           width: 100% !important;
           height: 100% !important;
+          max-height: 100% !important;
           object-fit: cover !important;
+          display: block !important;
+        }
+        #qr-shaded-region {
+          border-color: rgba(0, 0, 0, 0.45) !important;
+          border-radius: 0.75rem !important;
+          pointer-events: none !important;
         }
       `}</style>
     </div>
