@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Html5Qrcode,
   Html5QrcodeSupportedFormats,
@@ -124,6 +124,8 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<'camera' | 'manual'>('camera');
   const [manualCode, setManualCode] = useState('');
   const [processingFile, setProcessingFile] = useState(false);
+  const [isBlackFrame, setIsBlackFrame] = useState(false); // true = camera is IR/black
+
 
   const deviceType = detectDevice();
   const inApp = isInAppBrowser();
@@ -226,6 +228,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     setCameraError(null);
     setIsCameraStarting(true);
     setTorchOn(false);
+    setIsBlackFrame(false);
 
     await forceStopCamera();
     // โ… Wait for modal to paint (fixes html5-qrcode clientWidth=0 black screen)
@@ -247,6 +250,32 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         const track = (video?.srcObject as MediaStream)?.getVideoTracks()[0];
         setHasTorch('torch' in (track?.getCapabilities?.() ?? {}));
       } catch { setHasTorch(false); }
+
+      // ✅ Black frame detector: sample video pixels after 1.5s
+      // If average brightness < 8/255, it's likely an IR camera → show warning
+      setTimeout(() => {
+        if (!isMountedRef.current) return;
+        try {
+          const video = document.querySelector('#qr-reader-viewport video') as HTMLVideoElement;
+          if (!video || video.readyState < 2) return;
+          const canvas = document.createElement('canvas');
+          canvas.width = 32; canvas.height = 32;
+          const ctx2d = canvas.getContext('2d');
+          if (!ctx2d) return;
+          ctx2d.drawImage(video, 0, 0, 32, 32);
+          const data = ctx2d.getImageData(0, 0, 32, 32).data;
+          let sum = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+          }
+          const avgBrightness = sum / (32 * 32); // 0–255
+          if (avgBrightness < 10 && isMountedRef.current) {
+            setIsBlackFrame(true);
+          } else {
+            setIsBlackFrame(false);
+          }
+        } catch { /* ignore canvas errors */ }
+      }, 1800);
 
     } catch (err: unknown) {
       console.warn('[BarcodeScanner] error:', err);
@@ -482,6 +511,39 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
                   </div>
                 )}
               </div>
+
+              {/* ⚠️ Black frame / IR camera auto-detected warning */}
+              {isBlackFrame && !cameraError && !isCameraStarting && (
+                <div className="p-3 bg-orange-50 border-2 border-orange-300 rounded-xl text-orange-900 text-xs flex items-start gap-2.5 shadow-sm">
+                  <span className="text-lg flex-shrink-0 mt-0.5">⚠️</span>
+                  <div className="flex-1 space-y-2">
+                    <p className="font-bold text-orange-950">ตรวจพบกล้อง IR (ภาพมืด) — กล้องนี้ไม่รองรับการสแกน</p>
+                    <p className="text-[11px] leading-relaxed">
+                      {deviceType === 'desktop'
+                        ? 'กล้อง USB2.0 HD UVC WebCam ที่ตรวจพบเป็นกล้อง Infrared สำหรับ Face ID ภาพจะมืดเสมอ กรุณาลองกดปุ่ม "ถ่ายรูปสแกน" ด้านล่าง หรือเชื่อมต่อกล้องภายนอก'
+                        : 'กล้องที่เลือกอยู่ส่งภาพมืด ลองสลับกล้องหน้า/หลัง'}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-0.5">
+                      {deviceType === 'desktop' && availableCameras.length > 1 && (
+                        <button type="button" onClick={switchCamera}
+                          className="px-2.5 py-1 bg-orange-200 hover:bg-orange-300 text-orange-900 font-semibold rounded-lg text-xs transition-all flex items-center gap-1">
+                          <RefreshCw size={11} /> สลับกล้อง RGB
+                        </button>
+                      )}
+                      {(deviceType === 'mobile' || deviceType === 'tablet') && (
+                        <button type="button" onClick={switchCamera}
+                          className="px-2.5 py-1 bg-orange-200 hover:bg-orange-300 text-orange-900 font-semibold rounded-lg text-xs transition-all flex items-center gap-1">
+                          <RefreshCw size={11} /> สลับกล้อง
+                        </button>
+                      )}
+                      <button type="button" onClick={() => fileCaptureInputRef.current?.click()}
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs transition-all flex items-center gap-1">
+                        <Camera size={11} /> ถ่ายรูปสแกน (แนะนำ)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Error */}
               {cameraError && (
