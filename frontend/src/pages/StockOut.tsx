@@ -7,7 +7,7 @@ import BarcodeLabelModal, { type LabelItem } from '../components/BarcodeLabelMod
 import {
   Scan, Trash2, Save, ClipboardList, Check, X, Search,
   Printer, ArrowUpRight, Zap, FileText, AlertCircle, Sparkles, Plus, Minus,
-  Tag, Loader2, Package
+  Tag, Loader2, Package, RefreshCw
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useReactToPrint } from 'react-to-print';
@@ -93,6 +93,30 @@ export default function StockOut() {
       const res = await api.get('/inventory/requisitions');
       setReqs(res.data);
     } catch { /* ignore */ }
+  };
+
+  const handleDeleteReq = async (reqId: number, reqNo: string) => {
+    if (!confirm(`ต้องการลบรายการเบิก ${reqNo} ใช่หรือไม่?`)) return;
+    try {
+      const res = await api.delete(`/inventory/requisitions/${reqId}`);
+      alert(res.data?.message || 'ลบรายการสำเร็จ');
+      loadReqs();
+      loadQuickPicks();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการลบรายการ');
+    }
+  };
+
+  const handleClearAllReqHistory = async () => {
+    if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการเคลียร์ประวัติการเบิกจ่ายทั้งหมด?')) return;
+    try {
+      const res = await api.delete('/inventory/requisitions');
+      alert(res.data?.message || 'ล้างประวัติการเบิกจ่ายทั้งหมดสำเร็จ');
+      loadReqs();
+      loadQuickPicks();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการล้างประวัติ');
+    }
   };
 
   const loadQuickPicks = async () => {
@@ -879,6 +903,29 @@ export default function StockOut() {
       {/* History Tab */}
       {tab === 'history' && (
         <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-semibold text-slate-700">รายการประวัติการเบิกจ่าย ({reqs.length})</span>
+            <div className="flex items-center gap-2">
+              {reqs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAllReqHistory}
+                  className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
+                  title="ล้างประวัติการเบิกจ่ายทั้งหมด"
+                >
+                  <Trash2 size={13} /> เคลียร์ประวัติทั้งหมด
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={loadReqs}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <RefreshCw size={13} /> รีเฟรช
+              </button>
+            </div>
+          </div>
+
           {reqs.length === 0 ? (
             <div className="card text-center py-12 text-slate-400">
               <ClipboardList size={40} className="mx-auto text-slate-300 mb-2" />
@@ -935,6 +982,15 @@ export default function StockOut() {
                         </button>
                       </>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteReq(req.id, req.req_no)}
+                      className="p-1.5 rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      title="ลบรายการเบิกนี้"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                 </div>
               </div>

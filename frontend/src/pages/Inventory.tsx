@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useRealtimeEvent } from '../utils/socket';
-import { AlertTriangle, Search, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Search, RefreshCw, Trash2 } from 'lucide-react';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -36,6 +36,17 @@ export default function Inventory() {
   const loadMovements = async () => {
     const res = await api.get('/inventory/movements', { params: { limit: 100 } });
     setMovements(res.data);
+  };
+
+  const handleClearMovements = async () => {
+    if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการเคลียร์ประวัติความเคลื่อนไหวสต็อกทั้งหมด?')) return;
+    try {
+      const res = await api.delete('/inventory/movements');
+      alert(res.data?.message || 'ล้างประวัติความเคลื่อนไหวสต็อกสำเร็จ');
+      loadMovements();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการล้างประวัติ');
+    }
   };
 
   useEffect(() => { load(); }, [search, catFilter, lowOnly]);
@@ -169,8 +180,32 @@ export default function Inventory() {
       )}
 
       {tab === 'movements' && (
-        <div className="table-wrapper">
-          <table className="table">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-semibold text-slate-700">ประวัติความเคลื่อนไหวสต็อก ({movements.length} รายการ)</span>
+            <div className="flex items-center gap-2">
+              {movements.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearMovements}
+                  className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
+                  title="ล้างประวัติความเคลื่อนไหวสต็อกทั้งหมด"
+                >
+                  <Trash2 size={13} /> เคลียร์ประวัติทั้งหมด
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={loadMovements}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <RefreshCw size={13} /> รีเฟรช
+              </button>
+            </div>
+          </div>
+
+          <div className="table-wrapper">
+            <table className="table">
             <thead>
               <tr>
                 <th>วันที่</th>
@@ -199,7 +234,8 @@ export default function Inventory() {
             </tbody>
           </table>
         </div>
-      )}
+      </div>
+    )}
 
       {/* Adjust Modal */}
       {adjustModal && selectedProduct && (

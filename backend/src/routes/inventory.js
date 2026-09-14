@@ -393,4 +393,63 @@ router.post('/adjust', authenticate, async (req, res) => {
   }
 });
 
+// DELETE /api/inventory/requisitions/:id (ลบ/ยกเลิกคำขอเบิกสินค้า)
+router.delete('/requisitions/:id', authenticate, async (req, res) => {
+  try {
+    const reqId = req.params.id;
+    const reqRecord = await get('SELECT * FROM stock_requisitions WHERE id = ?', [reqId]);
+    if (!reqRecord) return res.status(404).json({ message: 'ไม่พบรายการเบิกสินค้า' });
+
+    // If it was already approved/disbursed, roll back stock!
+    if (reqRecord.status === 'approved') {
+      const items = await all('SELECT * FROM requisition_items WHERE req_id = ?', [reqId]);
+      for (const item of items) {
+        const product = await get('SELECT * FROM products WHERE id = ?', [item.product_id]);
+        if (product) {
+          const qtyToAdd = item.qty_approved || item.qty_requested;
+          const newStock = product.stock_qty + qtyToAdd;
+          await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, item.product_id]);
+        }
+      }
+    }
+
+    await run('DELETE FROM requisition_items WHERE req_id = ?', [reqId]);
+    await run('DELETE FROM stock_requisitions WHERE id = ?', [reqId]);
+
+    emitEvent('inventory:updated', { action: 'requisition_deleted', req_id: reqId });
+    emitEvent('dashboard:refresh', { trigger: 'requisition_deleted' });
+
+    res.json({ message: `ลบรายการเบิก ${reqRecord.req_no} สำเร็จ` });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/inventory/requisitions (ล้างประวัติการเบิกจ่ายทั้งหมด)
+router.delete('/requisitions', authenticate, async (req, res) => {
+  try {
+    await run('DELETE FROM requisition_items');
+    await run('DELETE FROM stock_requisitions');
+
+    emitEvent('inventory:updated', { action: 'requisition_all_deleted' });
+    emitEvent('dashboard:refresh', { trigger: 'requisition_all_deleted' });
+
+    res.json({ message: 'ล้างประวัติการเบิกจ่ายทั้งหมดสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/inventory/movements (ล้างประวัติความเคลื่อนไหวสต็อก)
+router.delete('/movements', authenticate, async (req, res) => {
+  try {
+    await run('DELETE FROM stock_movements');
+    emitEvent('inventory:updated', { action: 'movements_cleared' });
+    emitEvent('dashboard:refresh', { trigger: 'movements_cleared' });
+    res.json({ message: 'ล้างประวัติความเคลื่อนไหวสต็อกทั้งหมดสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
