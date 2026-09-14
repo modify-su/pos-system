@@ -817,7 +817,7 @@ export default function StockOut() {
               {/* Department */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  แผนก / จุดใช้งาน
+                  แผนก / ตำแหน่ง
                 </label>
                 <input
                   className="input text-sm"
