@@ -7,7 +7,7 @@ import BarcodeLabelModal, { type LabelItem } from '../components/BarcodeLabelMod
 import {
   Scan, Trash2, Save, ClipboardList, Check, X, Search,
   Printer, ArrowUpRight, Zap, FileText, AlertCircle, Sparkles, Plus, Minus,
-  Tag, Loader2
+  Tag, Loader2, Package
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useReactToPrint } from 'react-to-print';
@@ -44,6 +44,13 @@ export default function StockOut() {
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [scanNotice, setScanNotice] = useState<{
+    type: 'not_found' | 'out_of_stock' | 'success';
+    code: string;
+    productName?: string;
+    stock?: number;
+    unit?: string;
+  } | null>(null);
 
   const [lastVoucher, setLastVoucher] = useState<any>(null);
   const [viewingVoucher, setViewingVoucher] = useState<any>(null);
@@ -110,19 +117,44 @@ export default function StockOut() {
     try {
       const { data } = await api.get(`/products/barcode/${trimmed}`);
       if (data) {
+        if (data.stock_qty <= 0) {
+          setScanNotice({
+            type: 'out_of_stock',
+            code: trimmed,
+            productName: data.name,
+            stock: 0,
+            unit: data.unit || 'ชิ้น',
+          });
+          return;
+        }
         addProduct(data);
         setBarcodeInput('');
+        setScanNotice({
+          type: 'success',
+          code: trimmed,
+          productName: data.name,
+          stock: data.stock_qty,
+          unit: data.unit || 'ชิ้น',
+        });
+        setTimeout(() => setScanNotice((curr) => (curr?.type === 'success' ? null : curr)), 4000);
       }
     } catch {
-      setErrorMsg(`ไม่พบสินค้ารหัสบาร์โค้ด: ${trimmed}`);
-      setTimeout(() => setErrorMsg(''), 4000);
+      setScanNotice({
+        type: 'not_found',
+        code: trimmed,
+      });
     }
   };
 
   const addProduct = (p: any, defaultQty: number = 1) => {
     if (p.stock_qty <= 0) {
-      setErrorMsg(`สินค้า "${p.name}" ไม่มีสต็อกคงเหลือในคลัง`);
-      setTimeout(() => setErrorMsg(''), 4000);
+      setScanNotice({
+        type: 'out_of_stock',
+        code: p.barcode || '',
+        productName: p.name,
+        stock: 0,
+        unit: p.unit || 'ชิ้น',
+      });
       return;
     }
 
@@ -248,7 +280,7 @@ export default function StockOut() {
   return (
     <div className="p-6 space-y-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <ArrowUpRight className="text-blue-600" size={26} />
@@ -259,24 +291,36 @@ export default function StockOut() {
           </p>
         </div>
 
-        {/* Mode Selector */}
-        <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl text-xs font-semibold">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Mobile / Desktop Camera Scan Button */}
           <button
-            onClick={() => setMode('direct')}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              mode === 'direct' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
+            type="button"
+            onClick={() => setShowScanner(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all active:scale-95"
           >
-            <Zap size={14} /> เบิกจ่ายทันที (ตัดสต็อกเลย)
+            <Scan size={17} />
+            <span>สแกนกล้องเพื่อเบิก</span>
           </button>
-          <button
-            onClick={() => setMode('request')}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              mode === 'request' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <FileText size={14} /> สร้างคำขอเบิก (รออนุมัติ)
-          </button>
+
+          {/* Mode Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl text-xs font-semibold">
+            <button
+              onClick={() => setMode('direct')}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                mode === 'direct' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Zap size={14} /> เบิกจ่ายทันที (ตัดสต็อกเลย)
+            </button>
+            <button
+              onClick={() => setMode('request')}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                mode === 'request' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText size={14} /> สร้างคำขอเบิก (รออนุมัติ)
+            </button>
+          </div>
         </div>
       </div>
 
@@ -322,6 +366,87 @@ export default function StockOut() {
             <span>{errorMsg}</span>
           </div>
           <button onClick={() => setErrorMsg('')} className="text-red-400 hover:text-red-700">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Scanned Barcode Feedback Prompts */}
+      {scanNotice && scanNotice.type === 'not_found' && (
+        <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 shadow-md animate-fadeIn flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={22} />
+            <div>
+              <p className="font-bold text-amber-950 text-sm sm:text-base flex items-center gap-2 flex-wrap">
+                <span>กล้องสแกนสำเร็จ: รหัสบาร์โค้ด</span>
+                <span className="font-mono bg-amber-200/90 px-2.5 py-0.5 rounded-md border border-amber-300 text-amber-950 font-bold">
+                  {scanNotice.code}
+                </span>
+              </p>
+              <p className="text-xs text-amber-800 mt-1">
+                ⚠️ ยังไม่มีสินค้ารหัสนี้ในระบบคลังสินค้า กรุณาไปที่เมนู <b>"รับสินค้าเข้า"</b> เพื่อลงทะเบียนและรับสต็อกเข้าก่อนทำรายการเบิกจ่าย
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <a
+              href="/stock-in"
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap"
+            >
+              <Package size={15} /> ไปหน้ารับเข้าสินค้า
+            </a>
+            <button
+              onClick={() => setScanNotice(null)}
+              className="px-3 py-2 rounded-xl bg-amber-200/70 hover:bg-amber-300 text-amber-900 text-xs font-semibold"
+            >
+              ปิด
+            </button>
+          </div>
+        </div>
+      )}
+
+      {scanNotice && scanNotice.type === 'out_of_stock' && (
+        <div className="p-4 bg-red-50 border-2 border-red-300 rounded-2xl text-red-900 shadow-md animate-fadeIn flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={22} />
+            <div>
+              <p className="font-bold text-red-950 text-sm sm:text-base flex items-center gap-2 flex-wrap">
+                <span>กล้องสแกนสำเร็จ: {scanNotice.productName}</span>
+                <span className="font-mono bg-red-100 px-2 py-0.5 rounded-md border border-red-200 text-red-700 text-xs">
+                  ({scanNotice.code})
+                </span>
+              </p>
+              <p className="text-xs text-red-800 mt-1">
+                ❌ สินค้านี้มีสต็อกคงเหลือ <b>0 {scanNotice.unit || 'ชิ้น'}</b> ในคลัง ไม่สามารถเบิกจ่ายได้
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <a
+              href="/stock-in"
+              className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap"
+            >
+              <Package size={15} /> รับสต็อกเข้าเพิ่ม
+            </a>
+            <button
+              onClick={() => setScanNotice(null)}
+              className="px-3 py-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-800 text-xs font-semibold"
+            >
+              ปิด
+            </button>
+          </div>
+        </div>
+      )}
+
+      {scanNotice && scanNotice.type === 'success' && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 text-xs sm:text-sm shadow-sm flex items-center justify-between gap-2 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <Check className="text-emerald-600 flex-shrink-0" size={18} />
+            <span>
+              กล้องสแกนสำเร็จ: เพิ่ม <b>"{scanNotice.productName}"</b> ลงในรายการเบิกแล้ว (คงเหลือ {scanNotice.stock} {scanNotice.unit})
+            </span>
+          </div>
+          <button onClick={() => setScanNotice(null)} className="text-emerald-600 hover:text-emerald-800">
             <X size={16} />
           </button>
         </div>

@@ -128,24 +128,50 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       });
       html5QrCodeRef.current = scanner;
 
-      await scanner.start(
-        { facingMode: facing },
-        {
-          fps: 15,
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const w = Math.floor(Math.min(viewfinderWidth * 0.85, 340));
-            const h = Math.floor(Math.min(viewfinderHeight * 0.65, 240));
-            return { width: Math.max(w, 200), height: Math.max(h, 130) };
+      const scanConfig = {
+        fps: 15,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const w = Math.floor(Math.min(viewfinderWidth * 0.85, 340));
+          const h = Math.floor(Math.min(viewfinderHeight * 0.65, 240));
+          return { width: Math.max(w, 200), height: Math.max(h, 130) };
+        },
+      };
+
+      try {
+        // Attempt 1: Facing mode (environment / user) without rigid aspect ratio
+        await scanner.start(
+          { facingMode: facing },
+          scanConfig,
+          (decodedText) => {
+            handleSuccess(decodedText);
           },
-          aspectRatio: 1.333333,
-        },
-        (decodedText) => {
-          handleSuccess(decodedText);
-        },
-        () => {
-          // Ignored per-frame decode failure
+          () => {
+            // Ignored per-frame decode failure
+          }
+        );
+      } catch (firstErr) {
+        console.warn('FacingMode camera start failed, trying getCameras fallback...', firstErr);
+        // Attempt 2: Enumerate cameras and pick back camera ID
+        const cameras = await Html5Qrcode.getCameras();
+        if (!cameras || cameras.length === 0) {
+          throw firstErr;
         }
-      );
+        const backCamera =
+          cameras.find((c) =>
+            c.label.toLowerCase().includes('back') ||
+            c.label.toLowerCase().includes('rear') ||
+            c.label.toLowerCase().includes('environment')
+          ) || cameras[cameras.length - 1];
+
+        await scanner.start(
+          backCamera.id,
+          scanConfig,
+          (decodedText) => {
+            handleSuccess(decodedText);
+          },
+          () => {}
+        );
+      }
 
       // Check if torch/flashlight is supported
       try {
@@ -159,10 +185,14 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     } catch (err: unknown) {
       console.warn('Camera start error:', err);
       let msg = 'ไม่สามารถเปิดกล้องสดได้';
-      if (window.isSecureContext === false) {
+      const isLineOrInApp = /Line|FBAN|FBAV|Instagram|Messenger/i.test(navigator.userAgent);
+
+      if (isLineOrInApp) {
+        msg = 'ตรวจพบว่าเปิดผ่านแอป LINE / Messenger — กรุณาแตะปุ่ม 3 จุด (⋮) ด้านล่างขวา แล้วเลือก "เปิดในเบราว์เซอร์อื่น" (Chrome/Safari) หรือแตะปุ่ม "📸 ถ่ายรูปสแกน" ด้านล่างนี้ได้ทันทีครับ';
+      } else if (window.isSecureContext === false) {
         msg = 'กล้องสดบนมือถือถูกจำกัดโดยระบบความปลอดภัยของเบราว์เซอร์ (ต้องใช้ HTTPS) — คุณสามารถกดปุ่ม "ถ่ายรูปสแกน" ด้านล่างเพื่อสแกนได้ทันที 100%';
       } else if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'NotAllowedError') {
-        msg = 'กรุณากดอนุญาต (Allow) การใช้งานกล้องถ่ายรูปในเบราว์เซอร์มือถือ';
+        msg = 'กรุณากดอนุญาต (Allow) สิทธิ์การเข้าถึงกล้องถ่ายรูปในการตั้งค่าเบราว์เซอร์มือถือ';
       }
       setCameraError(msg);
     } finally {
@@ -233,7 +263,18 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   return (
     <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-3 backdrop-blur-xs animate-fadeIn">
       {/* Hidden container for image decoding worker */}
-      <div id="qr-reader-file-worker" className="hidden" />
+      <div
+        id="qr-reader-file-worker"
+        style={{
+          position: 'fixed',
+          top: '-9999px',
+          left: '-9999px',
+          width: '300px',
+          height: '300px',
+          pointerEvents: 'none',
+          opacity: 0,
+        }}
+      />
 
       {/* Hidden file inputs for Mobile Camera Capture & Gallery */}
       <input
