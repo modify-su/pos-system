@@ -4,6 +4,8 @@ import { useAuthStore } from '../stores/authStore';
 import api from '../api/client';
 import BarcodeScanner from '../components/BarcodeScanner';
 import { useRealtimeEvent, getSocket } from '../utils/socket';
+import SalesHistoryModal from '../components/SalesHistoryModal';
+import ReceiptModal from '../components/ReceiptModal';
 import {
   Scan, Search, ShoppingCart, Trash2, Plus, Minus,
   CreditCard, Banknote, Smartphone, Printer, Check, X, Receipt,
@@ -52,6 +54,8 @@ export default function POSSale() {
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
+  const [showSalesHistory, setShowSalesHistory] = useState(false);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
@@ -230,6 +234,15 @@ export default function POSSale() {
           </div>
           <button onClick={() => setShowScanner(true)} className="btn-primary px-5 text-base flex-shrink-0 shadow-sm">
             <Scan size={20} /> สแกนบาร์โค้ด
+          </button>
+          <button
+            onClick={() => setShowSalesHistory(true)}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-slate-800 hover:bg-slate-900 text-white shadow-sm flex-shrink-0 active:scale-95 transition-all"
+            title="ค้นหาบิลย้อนหลัง พิมพ์สำเนาใบเสร็จ และสำรองข้อมูล"
+          >
+            <Receipt size={17} className="text-emerald-400" />
+            <span className="hidden md:inline">ประวัติบิล / พิมพ์ซ้ำ</span>
+            <span className="md:hidden">ประวัติบิล</span>
           </button>
           <button onClick={loadCatalog} className="btn-outline px-3 shadow-sm" title="รีเฟรชสินค้า">
             <RefreshCw size={18} className={loading ? 'animate-spin text-blue-600' : ''} />
@@ -880,7 +893,7 @@ export default function POSSale() {
               <button
                 type="button"
                 onClick={() => {
-                  handlePrint();
+                  setShowReceiptModal(true);
                 }}
                 className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
               >
@@ -903,6 +916,21 @@ export default function POSSale() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Sales History & Receipt Reprint Modal */}
+      <SalesHistoryModal
+        isOpen={showSalesHistory}
+        onClose={() => setShowSalesHistory(false)}
+      />
+
+      {/* Full Receipt Modal */}
+      {showReceiptModal && lastSale && (
+        <ReceiptModal
+          sale={lastSale}
+          isReprint={false}
+          onClose={() => setShowReceiptModal(false)}
+        />
       )}
     </div>
   );

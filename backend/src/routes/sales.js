@@ -14,18 +14,143 @@ function generateSaleNo() {
   return `S${y}${m}${d}${t}`;
 }
 
+const XLSX = require('xlsx');
+
+// GET /api/sales/export - Download sales backup as Excel or JSON
+router.get('/export', authenticate, async (req, res) => {
+  try {
+    const { from, to, search, payment_method, format = 'excel' } = req.query;
+    let sql = `SELECT s.*, u.name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE 1=1`;
+    const params = [];
+
+    if (from) { sql += ' AND date(s.created_at) >= ?'; params.push(from); }
+    if (to)   { sql += ' AND date(s.created_at) <= ?'; params.push(to); }
+    if (payment_method && payment_method !== 'all') {
+      sql += ' AND s.payment_method = ?';
+      params.push(payment_method);
+    }
+    if (search) {
+      sql += ' AND (s.sale_no LIKE ? OR u.name LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    sql += ' ORDER BY s.created_at DESC';
+
+    const sales = await all(sql, params);
+
+    // Fetch items for all matching sales
+    const allSaleIds = sales.map(s => s.id);
+    let items = [];
+    if (allSaleIds.length > 0) {
+      const placeholders = allSaleIds.map(() => '?').join(',');
+      items = await all(`SELECT si.*, s.sale_no, s.created_at FROM sale_items si JOIN sales s ON si.sale_id = s.id WHERE si.sale_id IN (${placeholders}) ORDER BY s.created_at DESC, si.id ASC`, allSaleIds);
+    }
+
+    if (format === 'json') {
+      // Return full JSON backup
+      const salesWithItems = sales.map(s => ({
+        ...s,
+        items: items.filter(i => i.sale_id === s.id)
+      }));
+      res.setHeader('Content-Disposition', `attachment; filename=sales-backup-${Date.now()}.json`);
+      res.setHeader('Content-Type', 'application/json');
+      return res.json({
+        backup_date: new Date().toISOString(),
+        total_records: sales.length,
+        sales: salesWithItems
+      });
+    }
+
+    // Build Excel workbook
+    const summarySheetData = sales.map((s, idx) => ({
+      'ลำดับ': idx + 1,
+      'เลขที่บิล': s.sale_no,
+      'วันที่-เวลา': s.created_at,
+      'แคชเชียร์': s.cashier_name || '-',
+      'วิธีชำระเงิน': s.payment_method === 'cash' ? 'เงินสด' : s.payment_method === 'promptpay' ? 'พร้อมเพย์/โอน' : s.payment_method === 'credit' ? 'บัตรเครดิต' : s.payment_method,
+      'ยอดรวมก่อนลด (฿)': s.subtotal || s.total,
+      'ส่วนลด (฿)': s.discount_amount || 0,
+      'ยอดสุทธิ (฿)': s.total,
+      'รับเงิน (฿)': s.payment_amount || s.total,
+      'เงินทอน (฿)': s.change_amount || 0,
+      'สถานะ': s.status,
+      'หมายเหตุ': s.note || ''
+    }));
+
+    const detailSheetData = items.map((i, idx) => ({
+      'ลำดับ': idx + 1,
+      'เลขที่บิล': i.sale_no,
+      'วันที่': i.created_at,
+      'บาร์โค้ด': i.barcode || '',
+      'ชื่อสินค้า': i.product_name,
+      'จำนวน': i.qty,
+      'ราคาต่อหน่วย (฿)': i.unit_price,
+      'ส่วนลด (฿)': i.discount || 0,
+      'ยอดรวม (฿)': i.subtotal
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const wsSummary = XLSX.utils.json_to_sheet(summarySheetData.length > 0 ? summarySheetData : [{ 'ข้อมูล': 'ไม่มีรายการขาย' }]);
+    const wsDetails = XLSX.utils.json_to_sheet(detailSheetData.length > 0 ? detailSheetData : [{ 'ข้อมูล': 'ไม่มีรายการสินค้า' }]);
+
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'สรุปบิลขาย');
+    XLSX.utils.book_append_sheet(wb, wsDetails, 'รายละเอียดสินค้าที่ขาย');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename=sales-backup-${Date.now()}.xlsx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    return res.send(buf);
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการส่งออกข้อมูล: ' + err.message });
+  }
+});
+
 // GET /api/sales
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { from, to, page = 1, limit = 20 } = req.query;
-    let sql = `SELECT s.*, u.name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE 1=1`;
+    const { from, to, search, payment_method, page = 1, limit = 50 } = req.query;
+    let sql = `
+      SELECT s.*, u.name as cashier_name,
+        (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
+      FROM sales s 
+      LEFT JOIN users u ON s.user_id = u.id 
+      WHERE 1=1
+    `;
     const params = [];
+
     if (from) { sql += ' AND date(s.created_at) >= ?'; params.push(from); }
     if (to)   { sql += ' AND date(s.created_at) <= ?'; params.push(to); }
+    if (payment_method && payment_method !== 'all') {
+      sql += ' AND s.payment_method = ?';
+      params.push(payment_method);
+    }
+    if (search) {
+      sql += ' AND (s.sale_no LIKE ? OR u.name LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    // Get total count for pagination
+    let countSql = `SELECT COUNT(*) as count FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE 1=1`;
+    const countParams = [];
+    if (from) { countSql += ' AND date(s.created_at) >= ?'; countParams.push(from); }
+    if (to)   { countSql += ' AND date(s.created_at) <= ?'; countParams.push(to); }
+    if (payment_method && payment_method !== 'all') { countSql += ' AND s.payment_method = ?'; countParams.push(payment_method); }
+    if (search) { countSql += ' AND (s.sale_no LIKE ? OR u.name LIKE ?)'; countParams.push(`%${search}%`, `%${search}%`); }
+
+    const countRes = await get(countSql, countParams);
+    const totalCount = countRes?.count || 0;
+
     sql += ' ORDER BY s.created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
     const sales = await all(sql, params);
-    res.json(sales);
+
+    res.json({
+      sales,
+      total: totalCount,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(totalCount / parseInt(limit))
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
