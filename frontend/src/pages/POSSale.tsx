@@ -15,6 +15,35 @@ import { useReactToPrint } from 'react-to-print';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const playBeep = (type: 'success' | 'error' = 'success') => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (type === 'success') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1760, ctx.currentTime);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.09);
+    } else {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.2);
+    }
+  } catch {
+    // Ignore audio context initialization error
+  }
+};
+
 interface Product {
   id: number;
   barcode: string;
@@ -119,29 +148,80 @@ export default function POSSale() {
     });
   }, [products, selectedCategory, search]);
 
+  // Auto-focus search box on load and when modals close
+  useEffect(() => {
+    if (!showCheckout && !showChangeModal && !showSalesHistory && !showScanner) {
+      setTimeout(() => {
+        searchRef.current?.focus();
+      }, 80);
+    }
+  }, [showCheckout, showChangeModal, showSalesHistory, showScanner]);
+
   // Handle Barcode scan result
   const handleBarcodeResult = async (barcode: string, source: 'local' | 'remote' = 'local') => {
+    const trimmed = barcode.trim();
+    if (!trimmed) return;
+
+    // Fast check: find in local loaded products first to eliminate delay
+    const localProd = products.find((p) => p.barcode === trimmed);
+    if (localProd) {
+      if (localProd.stock_qty <= 0) {
+        playBeep('error');
+        setError(`สินค้า "${localProd.name}" หมดสต็อกแล้ว`);
+        setTimeout(() => setError(''), 3500);
+        return;
+      }
+      const inCart = items.find((i) => i.product_id === localProd.id);
+      if (inCart && inCart.qty >= localProd.stock_qty) {
+        playBeep('error');
+        setError(`สินค้า "${localProd.name}" มีในสต็อกเพียง ${localProd.stock_qty} ${localProd.unit}`);
+        setTimeout(() => setError(''), 3500);
+        return;
+      }
+      addItem(localProd);
+      playBeep('success');
+      setError('');
+
+      if (source === 'local') {
+        const s = getSocket();
+        if (s && s.connected) {
+          s.emit('pos:scan', { barcode: trimmed, senderId: s.id, productName: localProd.name });
+        }
+      }
+      return;
+    }
+
     try {
-      const { data } = await api.get(`/products/barcode/${barcode}`);
+      const { data } = await api.get(`/products/barcode/${trimmed}`);
       if (data) {
         if (data.stock_qty <= 0) {
+          playBeep('error');
           setError(`สินค้า "${data.name}" หมดสต็อกแล้ว`);
           setTimeout(() => setError(''), 3500);
           return;
         }
+        const inCart = items.find((i) => i.product_id === data.id);
+        if (inCart && inCart.qty >= data.stock_qty) {
+          playBeep('error');
+          setError(`สินค้า "${data.name}" มีในสต็อกเพียง ${data.stock_qty} ${data.unit}`);
+          setTimeout(() => setError(''), 3500);
+          return;
+        }
         addItem(data);
+        playBeep('success');
         setError('');
 
         // If scanned locally, broadcast to other connected devices (e.g. mobile to PC cashier)
         if (source === 'local') {
           const s = getSocket();
           if (s && s.connected) {
-            s.emit('pos:scan', { barcode, senderId: s.id, productName: data.name });
+            s.emit('pos:scan', { barcode: trimmed, senderId: s.id, productName: data.name });
           }
         }
       }
     } catch {
-      setError(`ไม่พบสินค้าบาร์โค้ด: ${barcode}`);
+      playBeep('error');
+      setError(`ไม่พบสินค้าบาร์โค้ด: ${trimmed}`);
       setTimeout(() => setError(''), 3500);
     }
   };
@@ -157,18 +237,91 @@ export default function POSSale() {
   // Add product to cart with stock validation
   const handleAddToCart = (product: Product) => {
     if (product.stock_qty <= 0) {
+      playBeep('error');
       setError(`สินค้า "${product.name}" หมดสต็อก`);
       setTimeout(() => setError(''), 3000);
       return;
     }
     const inCart = items.find((i) => i.product_id === product.id);
     if (inCart && inCart.qty >= product.stock_qty) {
+      playBeep('error');
       setError(`สินค้า "${product.name}" มีในสต็อกเพียง ${product.stock_qty} ${product.unit}`);
       setTimeout(() => setError(''), 3000);
       return;
     }
+    playBeep('success');
     addItem(product);
   };
+
+  // Global Hardware Barcode Scanner (USB/PDA/Bluetooth Wedge) & Hotkey listener
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const now = Date.now();
+      const target = e.target as HTMLElement;
+
+      // F2: Focus search bar
+      if (e.key === 'F2') {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+
+      // F4: Open checkout modal if cart has items
+      if (e.key === 'F4' && items.length > 0 && !showCheckout && !showChangeModal) {
+        e.preventDefault();
+        setShowCheckout(true);
+        return;
+      }
+
+      // Escape: Close modals
+      if (e.key === 'Escape') {
+        if (showCheckout) setShowCheckout(false);
+        if (showChangeModal) setShowChangeModal(false);
+        if (showSalesHistory) setShowSalesHistory(false);
+        if (showScanner) setShowScanner(false);
+        if (search) setSearch('');
+        return;
+      }
+
+      // Skip if typing in other modal inputs or textareas
+      const isOtherInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) && target !== searchRef.current;
+      if (isOtherInput) {
+        return;
+      }
+
+      // If user is typing in searchRef, let the input's onKeyDown handle Enter
+      if (target === searchRef.current) {
+        return;
+      }
+
+      // Hardware barcode scanner keystroke wedge detection
+      const timeDiff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      // If interval between keystrokes > 200ms, reset buffer (manual typing vs scanner speed)
+      if (timeDiff > 200) {
+        buffer = '';
+      }
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          const scannedCode = buffer.trim();
+          buffer = '';
+          handleBarcodeResult(scannedCode);
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [items, showCheckout, showChangeModal, showSalesHistory, showScanner, search, products]);
 
   // Checkout submission
   const handleCheckout = async () => {
@@ -218,10 +371,44 @@ export default function POSSale() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10" size={20} />
             <input
               ref={searchRef}
-              className="input-lg pl-12 pr-10 bg-white shadow-sm"
-              placeholder="ค้นหาสินค้าตามชื่อ, บาร์โค้ด หรือหมวดหมู่..."
+              className="input-lg pl-12 pr-10 bg-white shadow-sm font-mono text-base"
+              placeholder="ค้นหาชื่อ, บาร์โค้ด หรือยิงเครื่องสแกนบาร์โค้ด / PDA ได้ทันที... (F2)"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const q = search.trim();
+                  if (!q) return;
+
+                  // 1. Exact barcode match in loaded products
+                  const exactBarcode = products.find((p) => p.barcode === q);
+                  if (exactBarcode) {
+                    handleAddToCart(exactBarcode);
+                    setSearch('');
+                    return;
+                  }
+
+                  // 2. Exact name match
+                  const exactName = products.find((p) => p.name.toLowerCase() === q.toLowerCase());
+                  if (exactName) {
+                    handleAddToCart(exactName);
+                    setSearch('');
+                    return;
+                  }
+
+                  // 3. If filtered list only has 1 match
+                  if (filteredProducts.length === 1) {
+                    handleAddToCart(filteredProducts[0]);
+                    setSearch('');
+                    return;
+                  }
+
+                  // 4. Fallback to API barcode lookup
+                  handleBarcodeResult(q);
+                  setSearch('');
+                }
+              }}
             />
             {search && (
               <button
@@ -278,6 +465,21 @@ export default function POSSale() {
               </button>
             );
           })}
+        </div>
+
+        {/* Hardware Barcode Scanner & Hotkey Bar */}
+        <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 select-none">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2.5 py-0.5 rounded-full font-medium shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              เครื่องสแกนบาร์โค้ด USB / Bluetooth / PDA พร้อมทำงาน
+            </span>
+          </div>
+          <div className="hidden sm:flex items-center gap-3 text-slate-400">
+            <span><kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] text-slate-600 shadow-2xs font-sans">F2</kbd> ค้นหา/สแกน</span>
+            <span><kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] text-slate-600 shadow-2xs font-sans">F4</kbd> คิดเงิน</span>
+            <span><kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] text-slate-600 shadow-2xs font-sans">Esc</kbd> ปิดหน้าต่าง</span>
+          </div>
         </div>
 
         {/* Convenience Store Quick Hotkeys (สินค้าขายด่วน) */}
