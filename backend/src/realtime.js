@@ -67,7 +67,25 @@ function initRealtime(httpServer, corsOptions) {
 
     // Ping / pong heartbeat or custom echo
     socket.on('ping:client', (cb) => {
-      if (typeof cb === 'function') cb({ time: Date.now() });
+      if (typeof cb === 'function') cb({ time: Date.now(), id: socket.id });
+    });
+
+    // Mobile Barcode Scanner relay -> Send to POS screens
+    socket.on('pos:scan', (data) => {
+      console.log(`📱 [Scanner Relay] Barcode ${data?.barcode} from ${userLabel}`);
+      io.emit('pos:scanned', {
+        ...data,
+        sender: socket.user?.name || 'มือถือ (Mobile)',
+        timestamp: Date.now(),
+      });
+    });
+
+    // POS Cart Sync between devices
+    socket.on('pos:cart_sync', (data) => {
+      socket.broadcast.emit('pos:cart_synced', {
+        ...data,
+        sender: socket.user?.name,
+      });
     });
 
     socket.on('disconnect', (reason) => {

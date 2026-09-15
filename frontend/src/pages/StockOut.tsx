@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useReactToPrint } from 'react-to-print';
+import { useRealtimeEvent } from '../utils/socket';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -87,6 +88,15 @@ export default function StockOut() {
     loadReqs();
     loadQuickPicks();
   }, []);
+
+  // Real-time synchronization
+  useRealtimeEvent('inventory:updated', () => {
+    loadQuickPicks();
+    loadReqs();
+  });
+  useRealtimeEvent('requisition:updated', () => {
+    loadReqs();
+  });
 
   const loadReqs = async () => {
     try {

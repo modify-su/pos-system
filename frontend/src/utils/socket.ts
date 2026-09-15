@@ -4,13 +4,29 @@ import { io, Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 
 /**
+ * Get dynamic server URL for Socket.io
+ * In Vite dev (5173), connect directly to backend (3001) to bypass HMR proxy dropouts on mobile!
+ */
+export function getSocketUrl(): string {
+  if (typeof window === 'undefined') return '/';
+  if (window.location.port === '5173') {
+    return `${window.location.protocol}//${window.location.hostname}:3001`;
+  }
+  return window.location.origin;
+}
+
+/**
  * Get or initialize the Socket.io client
  */
 export function getSocket(): Socket {
   if (!socket) {
-    // Connect to current origin, which proxies through Vite in dev, or directly on production host
-    socket = io('/', {
+    const serverUrl = getSocketUrl();
+    socket = io(serverUrl, {
       path: '/socket.io',
+      auth: (cb) => {
+        const token = localStorage.getItem('pos_token');
+        cb({ token });
+      },
       withCredentials: true,
       transports: ['websocket', 'polling'],
       autoConnect: true,
@@ -18,10 +34,11 @@ export function getSocket(): Socket {
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
     socket.on('connect', () => {
-      console.log('⚡ [Realtime] Connected to server, ID:', socket?.id);
+      console.log('⚡ [Realtime] Connected to server, ID:', socket?.id, 'URL:', serverUrl);
     });
 
     socket.on('connect_error', (err) => {
@@ -34,6 +51,27 @@ export function getSocket(): Socket {
   }
 
   return socket;
+}
+
+/**
+ * Force reconnect socket (e.g. after login or network reconnect)
+ */
+export function reconnectSocket() {
+  if (socket) {
+    socket.disconnect().connect();
+  } else {
+    getSocket();
+  }
+}
+
+/**
+ * Relay barcode scan from mobile to active POS registers
+ */
+export function emitBarcodeScan(barcode: string) {
+  const s = getSocket();
+  if (s) {
+    s.emit('pos:scan', { barcode });
+  }
 }
 
 /**

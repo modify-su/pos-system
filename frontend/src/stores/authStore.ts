@@ -34,6 +34,10 @@ export const useAuthStore = create<AuthStore>()(
           localStorage.setItem('pos_token', data.token);
         }
         set({ user: data.user, token: data.token });
+        try {
+          const { reconnectSocket } = await import('../utils/socket');
+          reconnectSocket();
+        } catch { /* ignore */ }
       },
       logout: async () => {
         try {
@@ -43,6 +47,10 @@ export const useAuthStore = create<AuthStore>()(
         } finally {
           localStorage.removeItem('pos_token');
           set({ user: null, token: null });
+          try {
+            const { reconnectSocket } = await import('../utils/socket');
+            reconnectSocket();
+          } catch { /* ignore */ }
         }
       },
       checkSession: async () => {

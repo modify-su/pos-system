@@ -3,7 +3,7 @@ import { useCartStore } from '../stores/cartStore';
 import { useAuthStore } from '../stores/authStore';
 import api from '../api/client';
 import BarcodeScanner from '../components/BarcodeScanner';
-import { useRealtimeEvent } from '../utils/socket';
+import { useRealtimeEvent, getSocket } from '../utils/socket';
 import {
   Scan, Search, ShoppingCart, Trash2, Plus, Minus,
   CreditCard, Banknote, Smartphone, Printer, Check, X, Receipt,
@@ -116,7 +116,7 @@ export default function POSSale() {
   }, [products, selectedCategory, search]);
 
   // Handle Barcode scan result
-  const handleBarcodeResult = async (barcode: string) => {
+  const handleBarcodeResult = async (barcode: string, source: 'local' | 'remote' = 'local') => {
     try {
       const { data } = await api.get(`/products/barcode/${barcode}`);
       if (data) {
@@ -127,12 +127,28 @@ export default function POSSale() {
         }
         addItem(data);
         setError('');
+
+        // If scanned locally, broadcast to other connected devices (e.g. mobile to PC cashier)
+        if (source === 'local') {
+          const s = getSocket();
+          if (s && s.connected) {
+            s.emit('pos:scan', { barcode, senderId: s.id, productName: data.name });
+          }
+        }
       }
     } catch {
       setError(`ไม่พบสินค้าบาร์โค้ด: ${barcode}`);
       setTimeout(() => setError(''), 3500);
     }
   };
+
+  // Listen to remote barcode scans from mobile phone or other scanners
+  useRealtimeEvent('pos:scanned', (data: any) => {
+    const s = getSocket();
+    if (data && data.barcode && data.senderId !== s?.id) {
+      handleBarcodeResult(data.barcode, 'remote');
+    }
+  });
 
   // Add product to cart with stock validation
   const handleAddToCart = (product: Product) => {

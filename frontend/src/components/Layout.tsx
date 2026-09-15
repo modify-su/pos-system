@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { useRealtimeEvent } from '../utils/socket';
+import { useRealtimeEvent, useRealtimeStatus, reconnectSocket } from '../utils/socket';
 import {
   LayoutDashboard, ShoppingCart, Package, Tags,
   Warehouse, ArrowDownCircle, ArrowUpCircle, BarChart3,
@@ -39,6 +39,7 @@ export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [toast, setToast] = useState<{ message: string; type?: 'info' | 'success' | 'warn' } | null>(null);
+  const realtimeConnected = useRealtimeStatus();
 
   // Realtime notification toasts
   useRealtimeEvent('sale:created', (data) => {
@@ -124,6 +125,22 @@ export default function Layout() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {realtimeConnected ? (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>เรียลไทม์</span>
+            </span>
+          ) : (
+            <button
+              onClick={reconnectSocket}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-medium active:scale-95"
+              title="แตะเพื่อเชื่อมต่อใหม่"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+              <span>แตะต่อใหม่</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowQrModal(true)}
             className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all"
@@ -148,8 +165,25 @@ export default function Layout() {
             <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
               <Store className="text-blue-400" size={20} />
             </div>
-            <div>
-              <p className="font-bold text-white text-sm leading-tight">POS System</p>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-white text-sm leading-tight truncate">POS System</p>
+                {realtimeConnected ? (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-medium" title="เชื่อมต่อเซิร์ฟเวอร์เรียลไทม์แล้ว">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>สด</span>
+                  </span>
+                ) : (
+                  <button
+                    onClick={reconnectSocket}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-medium hover:bg-rose-500/30 transition-colors"
+                    title="คลิกเพื่อเชื่อมต่อใหม่"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                    <span>ต่อใหม่</span>
+                  </button>
+                )}
+              </div>
               <p className="text-xs text-slate-400 mt-0.5">ระบบจัดการร้านค้า</p>
             </div>
           </div>
@@ -411,6 +445,19 @@ export default function Layout() {
                 alt="Mobile Connection QR"
                 className="w-48 h-48 mx-auto rounded-lg"
               />
+            </div>
+
+            <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-200 text-left text-[11px] text-amber-800 space-y-1">
+              <p className="font-semibold">📶 เครือข่าย Wi-Fi ที่ต้องเชื่อมต่อ:</p>
+              <p className="text-xs font-bold text-amber-900">• เชื่อมต่อ Wi-Fi เดียวกันกับคอมพิวเตอร์ (เช่น Wi-Fi ที่บ้าน/ร้าน)</p>
+              <p className="text-[10px] text-amber-700">*หมายเหตุ: หากมือถือใช้เน็ตซิม (4G/5G) จะเชื่อมต่อไม่ได้ ต้องต่อ Wi-Fi เท่านั้น</p>
+            </div>
+
+            <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-left text-[11px] text-emerald-800 space-y-1">
+              <p className="font-semibold">⚡ ซิงค์ข้อมูลเรียลไทม์ (Real-time Sync):</p>
+              <p>• เมื่อเข้าสู่ระบบ จะมีจุดไฟเขียว <span className="font-bold text-emerald-700">🟢 เรียลไทม์</span> แสดงที่แถบด้านบน</p>
+              <p>• ยิงบาร์โค้ดจากมือถือ รายการจะเด้งไปที่หน้าจอคอมพิวเตอร์ทันที</p>
+              <p>• ขายสินค้าหรือรับของเข้าสต็อก ข้อมูลอัปเดตตรงกันทันทีแบบสดๆ</p>
             </div>
 
             <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-left space-y-1">

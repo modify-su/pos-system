@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
+import { useRealtimeEvent } from '../utils/socket';
 import {
   Search, Plus, Edit2, Trash2, X, Save, Package,
   UploadCloud, Link as LinkIcon, Image as ImageIcon, Loader2
@@ -35,6 +36,11 @@ export default function Products() {
   };
 
   useEffect(() => { load(); }, [search, catFilter]);
+
+  // Real-time synchronization
+  useRealtimeEvent('inventory:updated', () => {
+    load();
+  });
 
   const openNew = () => {
     setEditing(null);
