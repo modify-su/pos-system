@@ -10,6 +10,7 @@ export interface CartItem {
   qty: number;
   discount: number;
   subtotal: number;
+  image_url?: string;
 }
 
 interface CartStore {
@@ -50,6 +51,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
         qty,
         discount: 0,
         subtotal: qty * product.sell_price,
+        image_url: product.image_url,
       };
       return { items: [...state.items, newItem] };
     });

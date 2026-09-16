@@ -6,10 +6,11 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import { useRealtimeEvent, getSocket } from '../utils/socket';
 import SalesHistoryModal from '../components/SalesHistoryModal';
 import ReceiptModal from '../components/ReceiptModal';
+import ProductImageModal from '../components/ProductImageModal';
 import {
   Scan, Search, ShoppingCart, Trash2, Plus, Minus,
   CreditCard, Banknote, Smartphone, Printer, Check, X, Receipt,
-  Package, Filter, RefreshCw, Zap, ArrowRight
+  Package, Filter, RefreshCw, Zap, ArrowRight, Eye
 } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 
@@ -85,6 +86,7 @@ export default function POSSale() {
   const [showChangeModal, setShowChangeModal] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
@@ -147,6 +149,23 @@ export default function POSSale() {
       return matchCat && matchSearch;
     });
   }, [products, selectedCategory, search]);
+
+  const previewIndex = useMemo(() => {
+    if (!previewProduct) return -1;
+    return filteredProducts.findIndex((p) => p.id === previewProduct.id);
+  }, [previewProduct, filteredProducts]);
+
+  const handlePrevProduct = () => {
+    if (previewIndex > 0) {
+      setPreviewProduct(filteredProducts[previewIndex - 1]);
+    }
+  };
+
+  const handleNextProduct = () => {
+    if (previewIndex >= 0 && previewIndex < filteredProducts.length - 1) {
+      setPreviewProduct(filteredProducts[previewIndex + 1]);
+    }
+  };
 
   // Auto-focus search box on load and when modals close
   useEffect(() => {
@@ -620,6 +639,20 @@ export default function POSSale() {
                         <Package size={36} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
                         <span className="text-[10px] text-slate-400 font-mono mt-1">{p.barcode?.slice(-4)}</span>
                       </div>
+
+                      {/* View Image Button (ดูภาพสินค้า) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewProduct(p);
+                        }}
+                        className="absolute bottom-2 right-2 z-10 px-2 py-1 bg-white/95 hover:bg-blue-600 text-slate-700 hover:text-white rounded-lg shadow-sm border border-slate-200/90 text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 group/btn cursor-pointer backdrop-blur-xs"
+                        title="คลิกเพื่อดูภาพขนาดใหญ่และรายละเอียดสินค้า"
+                      >
+                        <Eye size={13} className="text-blue-600 group-hover/btn:text-white transition-colors" />
+                        <span>ดูภาพ</span>
+                      </button>
                     </div>
 
                     {/* Product Details */}
@@ -702,20 +735,42 @@ export default function POSSale() {
           ) : (
             <div className="divide-y divide-slate-100">
               {items.map((item) => (
-                <div key={item.product_id} className="p-3.5 hover:bg-slate-50/80 transition-colors">
-                  <div className="flex items-start justify-between gap-2">
+                <div key={item.product_id} className="p-3 hover:bg-slate-50/80 transition-colors">
+                  <div className="flex items-start gap-2.5">
+                    {/* Thumbnail with click to preview */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const found = products.find((p) => p.id === item.product_id);
+                        setPreviewProduct(found || (item as any));
+                      }}
+                      className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200 hover:border-blue-500 hover:shadow-xs transition-all relative group/thumb cursor-pointer flex items-center justify-center mt-0.5"
+                      title="คลิกเพื่อดูภาพสินค้าขนาดใหญ่"
+                    >
+                      {item.image_url ? (
+                        <img src={item.image_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <Package size={18} className="text-slate-400" />
+                      )}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center text-white transition-opacity">
+                        <Eye size={13} />
+                      </div>
+                    </button>
+
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{item.name}</p>
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{item.name}</p>
+                        <button
+                          onClick={() => removeItem(item.product_id)}
+                          className="text-slate-300 hover:text-red-500 transition-colors p-0.5"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
                       <p className="text-xs text-slate-400 font-mono mt-0.5">
                         ฿{fmt(item.unit_price)} / {item.unit}
                       </p>
                     </div>
-                    <button
-                      onClick={() => removeItem(item.product_id)}
-                      className="text-slate-300 hover:text-red-500 transition-colors p-0.5"
-                    >
-                      <X size={16} />
-                    </button>
                   </div>
 
                   <div className="flex items-center justify-between mt-2.5">
@@ -830,7 +885,22 @@ export default function POSSale() {
             {/* Item list */}
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 max-h-60">
               {items.map((item) => (
-                <div key={item.product_id} className="p-3 flex items-center justify-between gap-3">
+                <div key={item.product_id} className="p-3 flex items-center justify-between gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const found = products.find((p) => p.id === item.product_id);
+                      setPreviewProduct(found || (item as any));
+                    }}
+                    className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200 flex items-center justify-center relative cursor-pointer"
+                    title="คลิกเพื่อดูภาพสินค้า"
+                  >
+                    {item.image_url ? (
+                      <img src={item.image_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <Package size={18} className="text-slate-400" />
+                    )}
+                  </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-800 truncate">{item.name}</p>
                     <p className="text-xs text-slate-400 font-mono">฿{fmt(item.unit_price)} / {item.unit}</p>
@@ -1134,6 +1204,20 @@ export default function POSSale() {
           onClose={() => setShowReceiptModal(false)}
         />
       )}
+
+      {/* Product Image Inspection Modal */}
+      <ProductImageModal
+        product={previewProduct}
+        onClose={() => setPreviewProduct(null)}
+        onAddToCart={(p) => {
+          handleAddToCart(p);
+        }}
+        inCartQty={previewProduct ? cartQtyMap[previewProduct.id] || 0 : 0}
+        onPrev={handlePrevProduct}
+        onNext={handleNextProduct}
+        hasPrev={previewIndex > 0}
+        hasNext={previewIndex >= 0 && previewIndex < filteredProducts.length - 1}
+      />
     </div>
   );
 }
