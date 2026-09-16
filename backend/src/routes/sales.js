@@ -260,4 +260,155 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
+// DELETE /api/sales/:id - ลบรายการบิลขายเดี่ยว
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const restoreStock = req.query.restore_stock === 'true' || req.body?.restore_stock === true || (req.query.restore_stock === undefined && req.body?.restore_stock !== false);
+
+    const sale = await get('SELECT * FROM sales WHERE id = ?', [id]);
+    if (!sale) {
+      return res.status(404).json({ message: 'ไม่พบรายการบิลขายที่ต้องการลบ' });
+    }
+
+    const items = await all('SELECT * FROM sale_items WHERE sale_id = ?', [id]);
+
+    // คืนสต็อกสินค้ากลับเข้าระบบ หากตั้งค่า restore_stock เป็น true
+    if (restoreStock && items.length > 0) {
+      for (const item of items) {
+        const prod = await get('SELECT stock_qty FROM products WHERE id = ?', [item.product_id]);
+        if (prod) {
+          const newStock = prod.stock_qty + item.qty;
+          await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, item.product_id]);
+          await run(
+            `INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note, user_id)
+             VALUES (?, 'ADJUST', ?, ?, ?, 'void_sale', ?, ?, ?)`,
+            [item.product_id, item.qty, prod.stock_qty, newStock, id, `คืนสต็อกจากการลบบิลขาย #${sale.sale_no}`, req.user?.id || null]
+          );
+        }
+      }
+    }
+
+    // ลบรายการสินค้าในบิล, การเคลื่อนไหวสต็อกเดิมของบิลนี้ และบิลขาย
+    await run('DELETE FROM sale_items WHERE sale_id = ?', [id]);
+    await run("DELETE FROM stock_movements WHERE ref_type = 'sale' AND ref_id = ?", [id]);
+    await run('DELETE FROM sales WHERE id = ?', [id]);
+
+    // ส่งสัญญาณ Realtime แจ้งเตือนทุกเครื่อง
+    emitEvent('sale:deleted', {
+      sale_id: parseInt(id),
+      sale_no: sale.sale_no,
+      restored_stock: restoreStock,
+    });
+
+    if (restoreStock) {
+      emitEvent('inventory:updated', {
+        action: 'restore_stock',
+        ref: sale.sale_no,
+      });
+    }
+
+    emitEvent('dashboard:refresh', { trigger: 'sale_deleted', sale_id: id });
+
+    res.json({
+      success: true,
+      message: `ลบรายการบิลขาย ${sale.sale_no} สำเร็จ`,
+      restored_stock: restoreStock,
+    });
+  } catch (err) {
+    console.error('Delete sale error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการลบรายการขาย: ' + err.message });
+  }
+});
+
+// Clear history handler (ใช้ร่วมกันทั้ง POST /clear และ DELETE /)
+async function handleClearSales(req, res) {
+  try {
+    const { from, to, clear_all = false, restore_stock = false } = { ...req.query, ...req.body };
+
+    let sql = 'SELECT * FROM sales WHERE 1=1';
+    const params = [];
+
+    const isClearAll = clear_all === true || clear_all === 'true';
+    const isRestoreStock = restore_stock === true || restore_stock === 'true';
+
+    if (!isClearAll) {
+      if (from) {
+        sql += ' AND date(created_at) >= ?';
+        params.push(from);
+      }
+      if (to) {
+        sql += ' AND date(created_at) <= ?';
+        params.push(to);
+      }
+    }
+
+    const sales = await all(sql, params);
+    if (!sales || sales.length === 0) {
+      return res.status(400).json({ message: 'ไม่พบรายการขายที่ตรงตามเงื่อนไขเพื่อเคลียร์ประวัติ' });
+    }
+
+    const saleIds = sales.map((s) => s.id);
+    const placeholders = saleIds.map(() => '?').join(',');
+
+    // คืนสต็อกสินค้าหากผู้ใช้เลือกคืนสต็อก
+    if (isRestoreStock) {
+      const items = await all(`SELECT * FROM sale_items WHERE sale_id IN (${placeholders})`, saleIds);
+      const prodTotals = {};
+      for (const item of items) {
+        prodTotals[item.product_id] = (prodTotals[item.product_id] || 0) + item.qty;
+      }
+
+      for (const [productId, qty] of Object.entries(prodTotals)) {
+        const prod = await get('SELECT stock_qty FROM products WHERE id = ?', [productId]);
+        if (prod) {
+          const newStock = prod.stock_qty + qty;
+          await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, productId]);
+          await run(
+            `INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note, user_id)
+             VALUES (?, 'ADJUST', ?, ?, ?, 'clear_sales', 0, 'คืนสต็อกจากการล้างประวัติการขาย', ?)`,
+            [productId, qty, prod.stock_qty, newStock, req.user?.id || null]
+          );
+        }
+      }
+    }
+
+    // ลบรายการ sale_items, stock_movements, และ sales
+    await run(`DELETE FROM sale_items WHERE sale_id IN (${placeholders})`, saleIds);
+    await run(`DELETE FROM stock_movements WHERE ref_type = 'sale' AND ref_id IN (${placeholders})`, saleIds);
+    await run(`DELETE FROM sales WHERE id IN (${placeholders})`, saleIds);
+
+    // ส่งสัญญาณ Realtime แจ้งเตือนทุกเครื่อง
+    emitEvent('sales:cleared', {
+      count: sales.length,
+      clear_all: isClearAll,
+      from,
+      to,
+      restored_stock: isRestoreStock,
+    });
+
+    if (isRestoreStock) {
+      emitEvent('inventory:updated', { action: 'clear_sales_restore' });
+    }
+    emitEvent('dashboard:refresh', { trigger: 'sales_cleared' });
+
+    res.json({
+      success: true,
+      message: `เคลียร์ประวัติยอดขายเรียบร้อยแล้ว ทั้งหมด ${sales.length} รายการ`,
+      count: sales.length,
+      restored_stock: isRestoreStock,
+    });
+  } catch (err) {
+    console.error('Clear sales error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการเคลียร์ประวัติยอดขาย: ' + err.message });
+  }
+}
+
+// POST /api/sales/clear - เคลียร์ประวัติยอดขาย
+router.post('/clear', authenticate, handleClearSales);
+
+// DELETE /api/sales - เคลียร์ประวัติยอดขายแบบ RESTful
+router.delete('/', authenticate, handleClearSales);
+
 module.exports = router;
+

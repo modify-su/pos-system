@@ -145,7 +145,8 @@ router.get('/sales', authenticate, async (req, res) => {
     );
 
     const details = await all(
-      `SELECT s.sale_no, s.created_at, s.total, s.payment_method, s.discount_amount, u.name as cashier
+      `SELECT s.id, s.sale_no, s.created_at, s.total, s.payment_method, s.discount_amount, u.name as cashier,
+              (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
        FROM sales s LEFT JOIN users u ON s.user_id = u.id
        WHERE date(s.created_at) BETWEEN ? AND ? AND s.status='completed'
        ORDER BY s.created_at DESC`,
