@@ -50,6 +50,12 @@ const DEFAULT_LOGO = {
   shape: 'rounded-xl',
   store_name: 'POS System',
   store_slogan: 'ระบบจัดการร้านค้า',
+  tone_style: 'soft',
+  glow_effect: 'soft',
+  shadow_effect: 'soft',
+  border_width: 'thin',
+  gradient_color: '#1e3a8a',
+  glow_color: '#3b82f6',
 };
 
 /**

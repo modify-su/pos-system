@@ -146,6 +146,145 @@ const COLOR_PRESETS = [
   },
 ];
 
+interface TonePreset {
+  name: string;
+  tag: string;
+  desc: string;
+  icon_color: string;
+  bg_color: string;
+  gradient_color: string;
+  border_color: string;
+  glow_color: string;
+  tone_style: 'soft' | 'solid' | 'gradient' | 'glass';
+  glow_effect: 'none' | 'soft' | 'vibrant' | 'aura';
+  shadow_effect: 'none' | 'soft' | 'elevated';
+  border_width: 'none' | 'thin' | 'medium' | 'bold';
+  previewGradient: string;
+}
+
+const HIGH_IMPACT_TONE_PRESETS: TonePreset[] = [
+  {
+    name: 'Cyber Neon',
+    tag: 'นีออนเรืองแสง',
+    desc: 'ออร่าสีฟ้า สะดุดตาและสว่างคมชัด',
+    icon_color: '#38bdf8',
+    bg_color: '#0284c7',
+    gradient_color: '#082f49',
+    border_color: '#38bdf8',
+    glow_color: '#38bdf8',
+    tone_style: 'gradient',
+    glow_effect: 'vibrant',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-sky-400 to-cyan-600',
+  },
+  {
+    name: 'Gold Luxury',
+    tag: 'ทองคำหรูหรา',
+    desc: 'ออร่าประกายทอง ดูพรีเมียมมีระดับ',
+    icon_color: '#fef08a',
+    bg_color: '#b45309',
+    gradient_color: '#451a03',
+    border_color: '#f59e0b',
+    glow_color: '#f59e0b',
+    tone_style: 'gradient',
+    glow_effect: 'aura',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-amber-300 to-yellow-600',
+  },
+  {
+    name: 'Emerald Glow',
+    tag: 'มรกตเรืองแสง',
+    desc: 'ออร่านีออนเขียวสดใส สบายตาแต่โดดเด่น',
+    icon_color: '#6ee7b7',
+    bg_color: '#047857',
+    gradient_color: '#064e3b',
+    border_color: '#34d399',
+    glow_color: '#10b981',
+    tone_style: 'gradient',
+    glow_effect: 'vibrant',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-emerald-300 to-teal-600',
+  },
+  {
+    name: 'Sunset Flame',
+    tag: 'เพลิงพระอาทิตย์',
+    desc: 'ไฟส้มแดงร้อนแรง พลังดึงดูดสายตาขั้นสุด',
+    icon_color: '#fef08a',
+    bg_color: '#ea580c',
+    gradient_color: '#7f1d1d',
+    border_color: '#fb923c',
+    glow_color: '#f97316',
+    tone_style: 'gradient',
+    glow_effect: 'aura',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-amber-400 to-red-600',
+  },
+  {
+    name: 'Electric Violet',
+    tag: 'ม่วงล้ำยุค',
+    desc: 'ม่วงนีออนลึกลับ ไฮเทคและมีเสน่ห์',
+    icon_color: '#f3e8ff',
+    bg_color: '#7e22ce',
+    gradient_color: '#3b0764',
+    border_color: '#c084fc',
+    glow_color: '#a855f7',
+    tone_style: 'gradient',
+    glow_effect: 'vibrant',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-purple-400 to-indigo-600',
+  },
+  {
+    name: 'Ultra Solid Pop',
+    tag: 'สีทึบคอนทราสต์สูง',
+    desc: 'สีน้ำเงินสดทึบ 100% คมชัดไม่กลืนกับพื้นหลัง',
+    icon_color: '#ffffff',
+    bg_color: '#2563eb',
+    gradient_color: '#1d4ed8',
+    border_color: 'rgba(255, 255, 255, 0.4)',
+    glow_color: '#3b82f6',
+    tone_style: 'solid',
+    glow_effect: 'soft',
+    shadow_effect: 'elevated',
+    border_width: 'medium',
+    previewGradient: 'from-blue-500 to-blue-700',
+  },
+  {
+    name: 'Frosted Glass',
+    tag: 'กระจกฝ้าหรูหรา',
+    desc: 'โปร่งแสงมินิมอล โมเดิร์นมีระดับ',
+    icon_color: '#ffffff',
+    bg_color: 'rgba(255, 255, 255, 0.18)',
+    gradient_color: 'rgba(255, 255, 255, 0.05)',
+    border_color: 'rgba(255, 255, 255, 0.35)',
+    glow_color: '#ffffff',
+    tone_style: 'glass',
+    glow_effect: 'soft',
+    shadow_effect: 'soft',
+    border_width: 'thin',
+    previewGradient: 'from-slate-200 to-slate-400',
+  },
+  {
+    name: 'Subtle Classic',
+    tag: 'คลาสสิกดั้งเดิม',
+    desc: 'เรียบง่าย กลมกลืน สบายตา ไม่ฉูดฉาด',
+    icon_color: '#60a5fa',
+    bg_color: 'rgba(37, 99, 235, 0.2)',
+    gradient_color: '#1e3a8a',
+    border_color: 'rgba(59, 130, 246, 0.3)',
+    glow_color: '#3b82f6',
+    tone_style: 'soft',
+    glow_effect: 'none',
+    shadow_effect: 'none',
+    border_width: 'thin',
+    previewGradient: 'from-slate-400 to-slate-600',
+  },
+];
+
 export default function Settings() {
   const { user: currentUser } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'logo' | 'store'>('users');
@@ -1224,9 +1363,247 @@ export default function Settings() {
                 )}
               </div>
 
-              {/* Shape and Size Customization */}
+              {/* 2. Tone & High-Impact Enhancements */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                <div>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <Sparkles size={18} className="text-amber-500" />
+                      <span>2. ปรับแต่งโทน & แสงเงาเพื่อความโดดเด่น (Logo Tone & High-Impact Pop)</span>
+                    </h3>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                      ทำให้โลโก้เด่นสะดุดตา
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    เลือกโทนแสงออร่าเรืองแสง สีทึบคอนทราสต์สูง หรือการไล่เฉดสีมีมิติ เพื่อให้โลโก้โดดเด่นสะดุดตา ไม่กลืนกับพื้นหลังของระบบ
+                  </p>
+                </div>
+
+                {/* Quick High-Impact Presets Grid */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <span>⚡ โทนสีเด่นสะดุดตาสำเร็จรูป (1-Click Tone Presets)</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400">คลิกเพื่อเปลี่ยนโทนและแสงทันที</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {HIGH_IMPACT_TONE_PRESETS.map((preset) => {
+                      const isCurrentActive =
+                        logoConfig.tone_style === preset.tone_style &&
+                        logoConfig.glow_effect === preset.glow_effect &&
+                        logoConfig.bg_color === preset.bg_color;
+
+                      return (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => {
+                            setLogoConfig(prev => ({
+                              ...prev,
+                              icon_color: preset.icon_color,
+                              bg_color: preset.bg_color,
+                              gradient_color: preset.gradient_color,
+                              border_color: preset.border_color,
+                              glow_color: preset.glow_color,
+                              tone_style: preset.tone_style,
+                              glow_effect: preset.glow_effect,
+                              shadow_effect: preset.shadow_effect,
+                              border_width: preset.border_width,
+                            }));
+                          }}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all cursor-pointer relative overflow-hidden ${
+                            isCurrentActive
+                              ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 shadow-md'
+                              : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`w-3.5 h-3.5 rounded-full bg-gradient-to-br ${preset.previewGradient} shadow-sm`} />
+                            {isCurrentActive && <Check size={14} className="text-blue-600 font-bold" />}
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-slate-800">{preset.name}</div>
+                            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{preset.tag}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Detailed Tone Controls */}
+                <div className="pt-4 border-t border-slate-100 space-y-5">
+                  {/* A. Background Tone Style */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 block">
+                      สไตล์เนื้อสีพื้นหลัง (Background Tone Style)
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { key: 'solid', label: 'สีทึบคอนทราสต์สูง', desc: 'ไม่กลืนกับพื้นหลัง เด่น 100%' },
+                        { key: 'gradient', label: 'ไล่เฉดสีมีมิติ', desc: 'เฉดสีพรีเมียม สไตล์โมเดิร์น' },
+                        { key: 'soft', label: 'กึ่งโปร่งใสนุ่มนวล', desc: 'โทนอ่อน สะอาด สบายตา' },
+                        { key: 'glass', label: 'กระจกฝ้าหรูหรา', desc: 'เอฟเฟกต์ Frosted Glass' },
+                      ].map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setLogoConfig(prev => ({ ...prev, tone_style: item.key as any }))}
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            (logoConfig.tone_style || 'soft') === item.key
+                              ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold ring-2 ring-blue-400/20'
+                              : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{item.label}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">{item.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Gradient Stop Color Picker if gradient */}
+                    {logoConfig.tone_style === 'gradient' && (
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 mt-2 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-xs font-bold text-slate-700">สีปลายทางของการไล่เฉด (Gradient Stop Color)</div>
+                          <div className="text-[11px] text-slate-500">ไล่สีจากสีพื้นหลังหลัก ไปยังสีปลายทางนี้</div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <input
+                            type="color"
+                            value={logoConfig.gradient_color?.startsWith('#') ? logoConfig.gradient_color : '#0f172a'}
+                            onChange={(e) => setLogoConfig(prev => ({ ...prev, gradient_color: e.target.value }))}
+                            className="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white"
+                          />
+                          <input
+                            type="text"
+                            value={logoConfig.gradient_color || '#0f172a'}
+                            onChange={(e) => setLogoConfig(prev => ({ ...prev, gradient_color: e.target.value }))}
+                            className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* B. Glow Effect (Aura) */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 block">
+                        เอฟเฟกต์เรืองแสง (Glow / Aura Effect)
+                      </label>
+                      <span className="text-[10px] text-amber-600 font-medium">ช่วยให้โลโก้เปล่งแสงเด่นบน Sidebar ดำ</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { key: 'none', label: 'ไม่มี (Flat)', desc: 'ไม่เรืองแสง' },
+                        { key: 'soft', label: 'เรืองแสงนุ่มนวล', desc: 'รัศมีแสงเบาๆ นวลตา' },
+                        { key: 'vibrant', label: 'นีออนเด่นชัด', desc: 'เปล่งแสงสว่างวาบ' },
+                        { key: 'aura', label: 'ออร่ารอบทิศทาง', desc: 'แสงฟุ้งกระจายเด่นที่สุด' },
+                      ].map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setLogoConfig(prev => ({ ...prev, glow_effect: item.key as any }))}
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            (logoConfig.glow_effect || 'none') === item.key
+                              ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold ring-2 ring-amber-400/20'
+                              : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{item.label}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">{item.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Aura Glow Color picker */}
+                    {(logoConfig.glow_effect && logoConfig.glow_effect !== 'none') && (
+                      <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200/80 mt-2 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-xs font-bold text-amber-900">สีของแสงเรืองแสง (Aura Glow Color)</div>
+                          <div className="text-[11px] text-amber-700">ปรับแต่งสีแสงรัศมีรอบตัวโลโก้</div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <input
+                            type="color"
+                            value={logoConfig.glow_color?.startsWith('#') ? logoConfig.glow_color : (logoConfig.icon_color?.startsWith('#') ? logoConfig.icon_color : '#3b82f6')}
+                            onChange={(e) => setLogoConfig(prev => ({ ...prev, glow_color: e.target.value }))}
+                            className="w-8 h-8 rounded-lg cursor-pointer border border-amber-300 p-0.5 bg-white"
+                          />
+                          <input
+                            type="text"
+                            value={logoConfig.glow_color || logoConfig.icon_color || '#3b82f6'}
+                            onChange={(e) => setLogoConfig(prev => ({ ...prev, glow_color: e.target.value }))}
+                            className="w-24 px-2 py-1 border border-amber-300 rounded-lg text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* C. 3D Shadow Depth & Border Width */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                    {/* 3D Shadow */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">มิติเงา 3D (Shadow Depth)</label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { key: 'none', label: 'แบนราบ' },
+                          { key: 'soft', label: 'เงานุ่ม' },
+                          { key: 'elevated', label: 'เงาลอย 3D' },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setLogoConfig(prev => ({ ...prev, shadow_effect: item.key as any }))}
+                            className={`py-2 px-1 rounded-lg border text-center text-xs font-semibold transition-all cursor-pointer ${
+                              (logoConfig.shadow_effect || 'none') === item.key
+                                ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold'
+                                : 'border-slate-200 hover:border-slate-300 text-slate-600 bg-white'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Border Width */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">ความหนาเส้นขอบ (Border Width)</label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[
+                          { key: 'none', label: 'ไม่มี' },
+                          { key: 'thin', label: 'บาง (1px)' },
+                          { key: 'medium', label: 'กลาง (2px)' },
+                          { key: 'bold', label: 'หนา (3px)' },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setLogoConfig(prev => ({ ...prev, border_width: item.key as any }))}
+                            className={`py-2 px-1 rounded-lg border text-center text-xs font-semibold transition-all cursor-pointer ${
+                              (logoConfig.border_width || 'thin') === item.key
+                                ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold'
+                                : 'border-slate-200 hover:border-slate-300 text-slate-600 bg-white'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Shape and Size Customization */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-5">
-                <h3 className="text-sm font-bold text-slate-800">2. รูปทรง & ขนาดโลโก้ (Shape & Size)</h3>
+                <h3 className="text-sm font-bold text-slate-800">3. รูปทรง & ขนาดโลโก้ (Shape & Size)</h3>
 
                 {/* Shape options */}
                 <div className="space-y-2">
@@ -1283,9 +1660,9 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Branding Text */}
+              {/* 4. Branding Text */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
-                <h3 className="text-sm font-bold text-slate-800">3. ข้อความแบรนด์ร้านค้า (Branding Text)</h3>
+                <h3 className="text-sm font-bold text-slate-800">4. ข้อความแบรนด์ร้านค้า (Branding Text)</h3>
 
                 <div className="space-y-3">
                   <div className="space-y-1">
@@ -1397,6 +1774,25 @@ export default function Settings() {
                       </div>
                       <div className="text-xs text-slate-400 mt-0.5">
                         {logoConfig.store_slogan || 'ระบบจัดการขายหน้าร้าน'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4. Light Background Preview */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between">
+                      <span>บนพื้นหลังสีสว่าง (Light UI Mode)</span>
+                      <span className="text-slate-500 font-mono text-[10px]">Light Mode</span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-100 text-slate-900 border border-slate-200 flex items-center gap-3">
+                      <StoreLogo logo={logoConfig} />
+                      <div className="min-w-0">
+                        <div className="font-black text-sm text-slate-800 tracking-wide truncate">
+                          {logoConfig.store_name || 'POS System'}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {logoConfig.store_slogan || 'ระบบจัดการร้านค้า'}
+                        </div>
                       </div>
                     </div>
                   </div>

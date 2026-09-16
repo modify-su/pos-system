@@ -12,6 +12,12 @@ export interface LogoConfig {
   shape: 'rounded-xl' | 'rounded-full' | 'rounded-lg' | 'rounded-none';
   store_name: string;
   store_slogan: string;
+  tone_style?: 'soft' | 'solid' | 'gradient' | 'glass';
+  glow_effect?: 'none' | 'soft' | 'vibrant' | 'aura';
+  shadow_effect?: 'none' | 'soft' | 'elevated';
+  border_width?: 'none' | 'thin' | 'medium' | 'bold';
+  gradient_color?: string;
+  glow_color?: string;
 }
 
 export interface StoreInfo {
@@ -40,6 +46,12 @@ export const DEFAULT_STORE_INFO: StoreInfo = {
     shape: 'rounded-xl',
     store_name: 'POS System',
     store_slogan: 'ระบบจัดการร้านค้า',
+    tone_style: 'soft',
+    glow_effect: 'soft',
+    shadow_effect: 'soft',
+    border_width: 'thin',
+    gradient_color: '#1e3a8a',
+    glow_color: '#3b82f6',
   },
 };
 
