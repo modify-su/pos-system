@@ -70,7 +70,10 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Smart POS",
       "uninstallDisplayName": "Smart POS System",
-      "artifactName": "Smart POS Setup.${ext}"
+      "artifactName": "Smart POS Setup.${ext}",
+      "installerLanguages": ["th_TH"],
+      "language": "1054",
+      "warningsAsErrors": false
     },
     "portable": {
       "artifactName": "Smart POS Portable.${ext}"

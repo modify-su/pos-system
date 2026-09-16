@@ -25,6 +25,10 @@ if not exist node_modules (
 )
 
 echo.
+echo [*] กำลังตั้งค่าภาษาไทยสำหรับตัวติดตั้ง (Thai Localization)...
+call node patch-nsis-thai.cjs
+
+echo.
 echo [3/3] กำลังแพ็กเกจไฟล์ตัวติดตั้ง Windows (.exe)...
 echo กรุณารอสักครู่ (อาจใช้เวลาประมาณ 1-2 นาที)...
 echo.
