@@ -119,7 +119,7 @@ router.post('/login', async (req, res) => {
 
     if (!valid) {
       return res.status(401).json({
-        message: 'username หรือ password ไม่ถูกต้อง (บัญชีทดสอบ admin รหัสผ่านคือ admin1234 หรือ 1234)'
+        message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'
       });
     }
 
