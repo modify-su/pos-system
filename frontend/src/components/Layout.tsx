@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import api from '../api/client';
 import { useRealtimeEvent, useRealtimeStatus, reconnectSocket } from '../utils/socket';
 import {
   LayoutDashboard, ShoppingCart, Package, Tags,
@@ -104,11 +105,28 @@ export default function Layout() {
     return result;
   };
 
+  const [serverLanUrl, setServerLanUrl] = useState<string>('');
+
+  useEffect(() => {
+    api.get('/health').then((res) => {
+      if (res.data?.lanUrl) {
+        // If in Vite dev (5173), keep 5173 port for frontend, otherwise use backend 3001
+        if (window.location.port === '5173' && res.data.localIp) {
+          setServerLanUrl(`http://${res.data.localIp}:5173`);
+        } else {
+          setServerLanUrl(res.data.lanUrl);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
   const visibleItems = filterVisibleNav();
 
   // Determine current host/IP for mobile connection
-  const mobileHost = window.location.hostname === 'localhost' ? '192.168.1.109' : window.location.hostname;
-  const mobileUrl = `http://${mobileHost}:5173`;
+  const isCloudOrHttps = window.location.protocol === 'https:' || !['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const mobileUrl = isCloudOrHttps
+    ? window.location.origin
+    : (serverLanUrl || (window.location.port === '5173' ? `http://${window.location.hostname === 'localhost' ? '192.168.1.109' : window.location.hostname}:5173` : window.location.origin));
 
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-slate-100 relative">

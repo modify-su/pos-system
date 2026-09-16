@@ -58,12 +58,30 @@ app.use('/api/sales', require('./routes/sales'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/reports', require('./routes/reports'));
 
+const os = require('os');
+
+function getLocalIP() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
+  const localIp = getLocalIP();
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
     version: '1.0.0',
+    localIp,
+    port: PORT,
+    lanUrl: `http://${localIp}:${PORT}`,
     env: process.env.NODE_ENV || 'development',
   });
 });
