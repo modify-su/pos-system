@@ -410,5 +410,65 @@ router.post('/clear', authenticate, handleClearSales);
 // DELETE /api/sales - เคลียร์ประวัติยอดขายแบบ RESTful
 router.delete('/', authenticate, handleClearSales);
 
+// POST /api/sales/bulk-delete - ลบรายการขายหลายรายการพร้อมกัน
+router.post('/bulk-delete', authenticate, async (req, res) => {
+  try {
+    const { ids, restore_stock = true } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'กรุณาระบุรายการบิลขายที่ต้องการลบ' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const sales = await all(`SELECT id, sale_no FROM sales WHERE id IN (${placeholders})`, ids);
+    if (!sales || sales.length === 0) {
+      return res.status(404).json({ message: 'ไม่พบรายการบิลขายที่ต้องการลบ' });
+    }
+
+    const saleIds = sales.map((s) => s.id);
+    const validPlaceholders = saleIds.map(() => '?').join(',');
+    const shouldRestore = restore_stock === true || restore_stock === 'true';
+
+    if (shouldRestore) {
+      const items = await all(`SELECT * FROM sale_items WHERE sale_id IN (${validPlaceholders})`, saleIds);
+      const prodTotals = {};
+      for (const item of items) {
+        prodTotals[item.product_id] = (prodTotals[item.product_id] || 0) + item.qty;
+      }
+      for (const [productId, qty] of Object.entries(prodTotals)) {
+        const prod = await get('SELECT stock_qty FROM products WHERE id = ?', [productId]);
+        if (prod) {
+          const newStock = prod.stock_qty + qty;
+          await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStock, productId]);
+          await run(
+            `INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note, user_id)
+             VALUES (?, 'ADJUST', ?, ?, ?, 'void_sales_bulk', 0, 'คืนสต็อกจากการลบบิลขายหลายรายการ', ?)`,
+            [productId, qty, prod.stock_qty, newStock, req.user?.id || null]
+          );
+        }
+      }
+    }
+
+    await run(`DELETE FROM sale_items WHERE sale_id IN (${validPlaceholders})`, saleIds);
+    await run(`DELETE FROM stock_movements WHERE ref_type = 'sale' AND ref_id IN (${validPlaceholders})`, saleIds);
+    await run(`DELETE FROM sales WHERE id IN (${validPlaceholders})`, saleIds);
+
+    emitEvent('sale:deleted', { count: saleIds.length, bulk: true, restored_stock: shouldRestore });
+    if (shouldRestore) {
+      emitEvent('inventory:updated', { action: 'bulk_restore' });
+    }
+    emitEvent('dashboard:refresh', { trigger: 'bulk_sales_deleted' });
+
+    res.json({
+      success: true,
+      message: `ลบรายการขายที่เลือกสำเร็จ ทั้งหมด ${saleIds.length} รายการ`,
+      count: saleIds.length,
+      restored_stock: shouldRestore,
+    });
+  } catch (err) {
+    console.error('Bulk delete sales error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการลบรายการขาย: ' + err.message });
+  }
+});
+
 module.exports = router;
 

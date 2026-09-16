@@ -6,9 +6,10 @@ import {
 } from 'recharts';
 import {
   Download, RefreshCw, FileText, Package, Trash2,
-  AlertTriangle, CheckCircle2, X, AlertCircle
+  AlertTriangle, CheckCircle2, X, AlertCircle, Eye, CheckSquare, Square
 } from 'lucide-react';
 import { useRealtimeEvent } from '../utils/socket';
+import ReceiptModal, { type ReceiptSale } from '../components/ReceiptModal';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -40,12 +41,22 @@ export default function Reports() {
   const [restoreStockOnDelete, setRestoreStockOnDelete] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
+  // Bulk delete state
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [restoreStockOnBulk, setRestoreStockOnBulk] = useState(true);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Clear sales history state
   const [showClearModal, setShowClearModal] = useState(false);
   const [clearScope, setClearScope] = useState<'range' | 'all'>('range');
   const [restoreStockOnClear, setRestoreStockOnClear] = useState(false);
   const [clearConfirmText, setClearConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
+
+  // View Receipt Modal state
+  const [selectedReceiptSale, setSelectedReceiptSale] = useState<ReceiptSale | null>(null);
+  const [loadingReceiptId, setLoadingReceiptId] = useState<number | null>(null);
 
   // Toast / feedback message
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -55,6 +66,7 @@ export default function Reports() {
     try {
       const res = await api.get('/reports/sales', { params: { from, to, group_by: groupBy } });
       setSalesData(res.data);
+      setSelectedIds([]);
     } catch (err: any) {
       console.error('Failed to load sales report:', err);
     } finally {
@@ -90,6 +102,34 @@ export default function Reports() {
     if (tab === 'sales') loadSales();
   });
 
+  const handleOpenReceipt = async (saleId: number) => {
+    try {
+      setLoadingReceiptId(saleId);
+      const { data } = await api.get(`/sales/${saleId}`);
+      setSelectedReceiptSale(data);
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: 'ไม่สามารถโหลดรายละเอียดใบเสร็จได้: ' + (err.response?.data?.message || err.message)
+      });
+    } finally {
+      setLoadingReceiptId(null);
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    if (!salesData?.details?.length) return;
+    if (selectedIds.length === salesData.details.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(salesData.details.map((s: any) => s.id));
+    }
+  };
+
   const handleDeleteSale = async () => {
     if (!deleteTarget) return;
     try {
@@ -105,6 +145,26 @@ export default function Reports() {
       setFeedback({ type: 'error', message: err.response?.data?.message || err.message || 'เกิดข้อผิดพลาดในการลบรายการ' });
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      setBulkDeleting(true);
+      const res = await api.post('/sales/bulk-delete', {
+        ids: selectedIds,
+        restore_stock: restoreStockOnBulk
+      });
+      setFeedback({ type: 'success', message: res.data?.message || `ลบรายการขายที่เลือกสำเร็จ ${selectedIds.length} รายการ` });
+      setSelectedIds([]);
+      setShowBulkDeleteModal(false);
+      await loadSales();
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.response?.data?.message || err.message || 'เกิดข้อผิดพลาดในการลบรายการ' });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -169,7 +229,7 @@ export default function Reports() {
           { key: 'inventory', label: 'รายงานสินค้าคงคลัง', icon: Package },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm ${tab === key ? 'bg-blue-600 text-white' : 'bg-white text-slate-600'}`}>
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${tab === key ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>
             <Icon size={16} /> {label}
           </button>
         ))}
@@ -202,6 +262,18 @@ export default function Reports() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Bulk Delete Button when items are checked */}
+              {selectedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium shadow-sm transition-all active:scale-95"
+                  title="ลบรายการที่เลือก"
+                >
+                  <Trash2 size={16} /> ลบที่เลือก ({selectedIds.length})
+                </button>
+              )}
+
               <button onClick={() => salesData?.details && exportCSV(salesData.details, `sales_${from}_${to}`)}
                 className="btn-outline">
                 <Download size={16} /> Export CSV
@@ -214,7 +286,7 @@ export default function Reports() {
                   setShowClearModal(true);
                   setClearConfirmText('');
                 }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 rounded-lg text-sm font-medium transition-all"
+                className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-300 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-sm font-medium transition-all shadow-xs"
                 title="เคลียร์ประวัติยอดขาย"
               >
                 <Trash2 size={16} /> เคลียร์ประวัติ
@@ -264,46 +336,82 @@ export default function Reports() {
               <table className="table">
                 <thead>
                   <tr>
+                    <th className="w-10 text-center">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAll}
+                        className="text-slate-400 hover:text-blue-600 transition-colors inline-flex items-center justify-center p-1"
+                        title={selectedIds.length === salesData.details.length ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทั้งหมด'}
+                      >
+                        {selectedIds.length > 0 && selectedIds.length === salesData.details.length ? (
+                          <CheckSquare size={17} className="text-blue-600" />
+                        ) : (
+                          <Square size={17} />
+                        )}
+                      </button>
+                    </th>
                     <th>เลขที่</th>
                     <th>วันที่</th>
                     <th>แคชเชียร์</th>
                     <th>ช่องทาง</th>
                     <th className="text-right">ส่วนลด</th>
                     <th className="text-right">ยอดรวม</th>
-                    <th className="text-center w-24">จัดการ</th>
+                    <th className="text-center w-36">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {salesData.details.map((s: any) => (
-                    <tr key={s.sale_no}>
-                      <td className="font-mono text-sm font-semibold text-blue-700">{s.sale_no}</td>
-                      <td className="text-sm text-slate-500">{new Date(s.created_at).toLocaleString('th-TH')}</td>
-                      <td className="text-sm">{s.cashier || '-'}</td>
-                      <td>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          s.payment_method === 'cash' ? 'bg-emerald-100 text-emerald-700' :
-                          s.payment_method === 'promptpay' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                        }`}>
-                          {s.payment_method === 'cash' ? 'เงินสด' : s.payment_method === 'promptpay' ? 'พร้อมเพย์' : 'บัตร'}
-                        </span>
-                      </td>
-                      <td className="text-right text-sm">{s.discount_amount > 0 ? `฿${fmt(s.discount_amount)}` : '-'}</td>
-                      <td className="text-right font-semibold font-mono">฿{fmt(s.total)}</td>
-                      <td className="text-center">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDeleteTarget(s);
-                            setRestoreStockOnDelete(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors active:scale-95"
-                          title="ลบรายการบิลนี้"
-                        >
-                          <Trash2 size={13} /> ลบ
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {salesData.details.map((s: any) => {
+                    const isSelected = selectedIds.includes(s.id);
+                    return (
+                      <tr key={s.sale_no} className={isSelected ? 'bg-blue-50/40' : ''}>
+                        <td className="text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(s.id)}
+                            className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer align-middle"
+                          />
+                        </td>
+                        <td className="font-mono text-sm font-semibold text-blue-700">{s.sale_no}</td>
+                        <td className="text-sm text-slate-500">{new Date(s.created_at).toLocaleString('th-TH')}</td>
+                        <td className="text-sm">{s.cashier || '-'}</td>
+                        <td>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            s.payment_method === 'cash' ? 'bg-emerald-100 text-emerald-700' :
+                            s.payment_method === 'promptpay' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                          }`}>
+                            {s.payment_method === 'cash' ? 'เงินสด' : s.payment_method === 'promptpay' ? 'พร้อมเพย์' : 'บัตร'}
+                          </span>
+                        </td>
+                        <td className="text-right text-sm">{s.discount_amount > 0 ? `฿${fmt(s.discount_amount)}` : '-'}</td>
+                        <td className="text-right font-semibold font-mono">฿{fmt(s.total)}</td>
+                        <td className="text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReceipt(s.id)}
+                              disabled={loadingReceiptId === s.id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors active:scale-95 disabled:opacity-50"
+                              title="ดูรายละเอียดบิล / พิมพ์ใบเสร็จ"
+                            >
+                              <Eye size={13} /> {loadingReceiptId === s.id ? '...' : 'ดูบิล'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteTarget(s);
+                                setRestoreStockOnDelete(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors active:scale-95"
+                              title="ลบรายการบิลนี้"
+                            >
+                              <Trash2 size={13} /> ลบ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -454,6 +562,68 @@ export default function Reports() {
         </div>
       )}
 
+      {/* Bulk Delete Modal */}
+      {showBulkDeleteModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => !bulkDeleting && setShowBulkDeleteModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-3 text-red-600 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">ยืนยันการลบรายการที่เลือก</h3>
+                  <p className="text-xs text-slate-500">เลือกไว้ทั้งหมด <strong className="text-red-600 font-bold">{selectedIds.length}</strong> รายการ</p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 leading-relaxed mb-4">
+                ⚠️ รายการบิลขายที่เลือกจะถูกลบออกจากระบบอย่างถาวร ยอดรายงานจะถูกคำนวณใหม่
+              </div>
+
+              <label className="flex items-start gap-3 p-3 bg-blue-50/60 border border-blue-100 rounded-xl cursor-pointer hover:bg-blue-50 transition-colors mb-5">
+                <input
+                  type="checkbox"
+                  checked={restoreStockOnBulk}
+                  onChange={(e) => setRestoreStockOnBulk(e.target.checked)}
+                  className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                />
+                <div className="text-xs">
+                  <p className="font-bold text-blue-900">คืนสต็อกสินค้ากลับเข้าระบบ (แนะนำ)</p>
+                  <p className="text-blue-600/80 mt-0.5">บวกจำนวนสินค้าที่เคยตัดขายในบิลเหล่านี้กลับเข้าคลังสินค้าอัตโนมัติ</p>
+                </div>
+              </label>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  disabled={bulkDeleting}
+                  onClick={() => setShowBulkDeleteModal(false)}
+                  className="btn-secondary px-4 py-2 text-xs font-semibold"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkDeleting}
+                  onClick={handleBulkDelete}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50 inline-flex items-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  <span>{bulkDeleting ? 'กำลังลบ...' : `ยืนยันลบ (${selectedIds.length} รายการ)`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Clear Sales History Modal */}
       {showClearModal && (
         <div
@@ -581,6 +751,15 @@ export default function Reports() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Receipt Modal for Viewing / Reprints */}
+      {selectedReceiptSale && (
+        <ReceiptModal
+          sale={selectedReceiptSale}
+          isReprint={true}
+          onClose={() => setSelectedReceiptSale(null)}
+        />
       )}
     </div>
   );
