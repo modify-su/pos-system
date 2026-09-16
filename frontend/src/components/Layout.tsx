@@ -141,7 +141,11 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-slate-100 relative">
-      {/* Mobile Top Header (Visible on mobile only) */}
+      {/* ========================================================================= */}
+      {/* 📌 [จุดปรับแต่งแทบบาร์มือถือ: Mobile Topbar Header]                          */}
+      {/* ปรับความสูง หรือระยะห่าง (Padding) แถบบาร์บนมือถือได้ที่:                    */}
+      {/*   - 'px-4 py-3' -> ปรับเป็น 'px-5 py-4' เพื่อเพิ่มความสูงแทบบาร์บนมือถือ     */}
+      {/* ========================================================================= */}
       <header className="md:hidden bg-slate-900 text-white px-4 py-3 flex items-center justify-between shadow-md z-30 flex-shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
           <StoreLogo logo={storeInfo?.logo} size="sm" />
@@ -188,7 +192,15 @@ export default function Layout() {
         </div>
       </header>
 
-      {/* Desktop Sidebar (Hidden on mobile) */}
+      {/* ========================================================================= */}
+      {/* 📌 [จุดปรับแต่งและขยายความกว้างแทบเมนูบาร์ด้านข้าง: Desktop Sidebar Width]    */}
+      {/* ปรับเปลี่ยนความกว้างของแทบบาร์เมนูซ้ายได้ที่คลาส 'w-60' (ปัจจุบัน 240px)      */}
+      {/* ตัวเลือกความกว้างยอดนิยม (Tailwind Width Classes):                           */}
+      {/*   - 'w-64'  = 256px  (กว้างมาตรฐาน สบายตา)                                  */}
+      {/*   - 'w-72'  = 288px  (กว้างขึ้น กำลังสวย โลโก้และข้อความเด่นชัด)            */}
+      {/*   - 'w-80'  = 320px  (กว้างพิเศษ เหมาะกับหน้าจอใหญ่ จอ Wide)                */}
+      {/*   - 'w-[280px]' หรือกำหนดพิกเซลเองได้เลย เช่น 'w-[270px]'                   */}
+      {/* ========================================================================= */}
       <aside className="hidden md:flex w-60 flex-shrink-0 bg-slate-900 text-slate-300 flex-col">
         {/* Logo */}
         <div className="px-5 py-4 border-b border-slate-700">
