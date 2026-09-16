@@ -1,0 +1,79 @@
+{
+  "name": "smart-pos-desktop",
+  "version": "1.0.0",
+  "description": "Smart POS & Warehouse Desktop Application",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "keywords": [
+    "pos",
+    "electron",
+    "desktop"
+  ],
+  "author": "Smart POS Team",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.smartpos.desktop",
+    "productName": "Smart POS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!pos.db-shm",
+          "!pos.db-wal",
+          "!*.log",
+          "!.git/**"
+        ]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Smart POS",
+      "uninstallDisplayName": "Smart POS System",
+      "artifactName": "Smart POS Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Smart POS Portable.${ext}"
+    }
+  }
+}

@@ -42,7 +42,11 @@ app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsPath = process.env.UPLOADS_DIR ? path.resolve(process.env.UPLOADS_DIR) : path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsPath));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -65,7 +69,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve frontend static build in production or when dist exists
-const frontendDist = path.join(__dirname, '../../frontend/dist');
+const frontendDist = process.env.FRONTEND_DIST ? path.resolve(process.env.FRONTEND_DIST) : path.join(__dirname, '../../frontend/dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
   app.use((req, res, next) => {
