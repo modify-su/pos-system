@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { Store, Eye, EyeOff, LogIn } from 'lucide-react';
+import { useSettingsStore } from '../stores/settingsStore';
+import StoreLogo from '../components/StoreLogo';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -10,7 +12,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { login } = useAuthStore();
+  const { storeInfo, fetchStoreInfo } = useSettingsStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchStoreInfo();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,12 +37,16 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg mb-4">
-            <Store className="text-blue-600" size={32} />
+        <div className="text-center mb-8 flex flex-col items-center">
+          <div className="mb-4">
+            <StoreLogo logo={storeInfo?.logo} size="xl" className="shadow-lg" />
           </div>
-          <h1 className="text-3xl font-bold text-white">POS System</h1>
-          <p className="text-blue-200 mt-1">ระบบจัดการร้านค้าครบวงจร</p>
+          <h1 className="text-3xl font-bold text-white">
+            {storeInfo?.logo?.store_name || storeInfo?.name || 'POS System'}
+          </h1>
+          <p className="text-blue-200 mt-1">
+            {storeInfo?.logo?.store_slogan || 'ระบบจัดการร้านค้าครบวงจร'}
+          </p>
         </div>
 
         {/* Card */}

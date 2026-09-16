@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import StoreLogo from './StoreLogo';
 import api from '../api/client';
 import { useRealtimeEvent, useRealtimeStatus, reconnectSocket } from '../utils/socket';
 import {
   LayoutDashboard, ShoppingCart, Package, Tags,
   Warehouse, ArrowDownCircle, ArrowUpCircle, BarChart3,
-  LogOut, Store, Menu, X, Smartphone, QrCode,
+  LogOut, Menu, X, Smartphone, QrCode,
   Settings as SettingsIcon
 } from 'lucide-react';
 
@@ -36,11 +38,20 @@ const navItems: NavItem[] = [
 
 export default function Layout() {
   const { user, logout, hasPermission } = useAuthStore();
+  const { storeInfo, fetchStoreInfo } = useSettingsStore();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [toast, setToast] = useState<{ message: string; type?: 'info' | 'success' | 'warn' } | null>(null);
   const realtimeConnected = useRealtimeStatus();
+
+  useEffect(() => {
+    fetchStoreInfo();
+  }, []);
+
+  useRealtimeEvent('settings:updated', () => {
+    fetchStoreInfo();
+  });
 
   // Realtime notification toasts
   useRealtimeEvent('sale:created', (data) => {
@@ -132,13 +143,15 @@ export default function Layout() {
     <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-slate-100 relative">
       {/* Mobile Top Header (Visible on mobile only) */}
       <header className="md:hidden bg-slate-900 text-white px-4 py-3 flex items-center justify-between shadow-md z-30 flex-shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
-            <Store className="text-blue-400" size={18} />
-          </div>
-          <div>
-            <p className="font-bold text-sm leading-tight text-white">POS System</p>
-            <p className="text-[10px] text-slate-400">ระบบจัดการร้านค้า</p>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <StoreLogo logo={storeInfo?.logo} size="sm" />
+          <div className="min-w-0">
+            <p className="font-bold text-sm leading-tight text-white truncate">
+              {storeInfo?.logo?.store_name || storeInfo?.name || 'POS System'}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate">
+              {storeInfo?.logo?.store_slogan || 'ระบบจัดการร้านค้า'}
+            </p>
           </div>
         </div>
 
@@ -180,16 +193,16 @@ export default function Layout() {
         {/* Logo */}
         <div className="px-5 py-4 border-b border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
-              <Store className="text-blue-400" size={20} />
-            </div>
+            <StoreLogo logo={storeInfo?.logo} size={storeInfo?.logo?.size || 'md'} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <p className="font-bold text-white text-sm leading-tight truncate">POS System</p>
+                <p className="font-bold text-white text-sm leading-tight truncate">
+                  {storeInfo?.logo?.store_name || storeInfo?.name || 'POS System'}
+                </p>
                 {realtimeConnected ? (
                   <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-medium" title="เชื่อมต่อเซิร์ฟเวอร์เรียลไทม์แล้ว">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>สด</span>
+                    <span>เรียลไทม์</span>
                   </span>
                 ) : (
                   <button
@@ -202,7 +215,9 @@ export default function Layout() {
                   </button>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">ระบบจัดการร้านค้า</p>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                {storeInfo?.logo?.store_slogan || 'ระบบจัดการร้านค้า'}
+              </p>
             </div>
           </div>
         </div>
@@ -369,13 +384,15 @@ export default function Layout() {
           {/* Drawer Body */}
           <div className="relative w-72 max-w-[80vw] bg-slate-900 text-slate-300 h-full flex flex-col shadow-2xl z-10 animate-slideRight">
             <div className="p-4 border-b border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
-                  <Store className="text-blue-400" size={18} />
-                </div>
-                <div>
-                  <p className="font-bold text-white text-sm">POS System</p>
-                  <p className="text-[10px] text-slate-400">ระบบจัดการร้านค้า</p>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <StoreLogo logo={storeInfo?.logo} size="sm" />
+                <div className="min-w-0">
+                  <p className="font-bold text-white text-sm truncate">
+                    {storeInfo?.logo?.store_name || storeInfo?.name || 'POS System'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {storeInfo?.logo?.store_slogan || 'ระบบจัดการร้านค้า'}
+                  </p>
                 </div>
               </div>
               <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400 hover:text-white p-1">

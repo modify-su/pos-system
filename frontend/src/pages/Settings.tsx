@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { useSettingsStore, type LogoConfig, type StoreInfo, DEFAULT_STORE_INFO } from '../stores/settingsStore';
+import StoreLogo, { ICON_MAP } from '../components/StoreLogo';
 import {
   Users, Shield, Store, Plus, Edit2, Trash2,
   X, AlertCircle, Save, RefreshCw, CheckCircle2,
   LayoutDashboard, ShoppingCart, Warehouse, ArrowDownCircle,
   ArrowUpCircle, Package, Tags, BarChart3, Settings as SettingsIcon,
-  Lock, Eye, EyeOff, UserCheck, UserX
+  Lock, Eye, EyeOff, UserCheck, UserX, Palette, Upload, Image as ImageIcon,
+  Sparkles, Check
 } from 'lucide-react';
 
 interface UserData {
@@ -17,14 +20,6 @@ interface UserData {
   active: number;
   permissions: string[] | null;
   created_at?: string;
-}
-
-interface StoreInfo {
-  name: string;
-  tax_id: string;
-  phone: string;
-  address: string;
-  receipt_footer: string;
 }
 
 const ALL_MENU_PERMISSIONS = [
@@ -99,9 +94,61 @@ const DEFAULT_ROLE_PERMS: Record<string, string[]> = {
   storekeeper: ['dashboard', 'inventory', 'stock-in', 'stock-out'],
 };
 
+const COLOR_PRESETS = [
+  {
+    name: 'ฟ้า (Sky Blue)',
+    icon_color: '#60a5fa',
+    bg_color: 'rgba(37, 99, 235, 0.2)',
+    border_color: 'rgba(59, 130, 246, 0.3)',
+    dot: '#3b82f6',
+  },
+  {
+    name: 'เขียว (Emerald)',
+    icon_color: '#34d399',
+    bg_color: 'rgba(16, 185, 129, 0.2)',
+    border_color: 'rgba(52, 211, 153, 0.3)',
+    dot: '#10b981',
+  },
+  {
+    name: 'ทอง (Amber)',
+    icon_color: '#fbbf24',
+    bg_color: 'rgba(245, 158, 11, 0.2)',
+    border_color: 'rgba(251, 191, 36, 0.3)',
+    dot: '#f59e0b',
+  },
+  {
+    name: 'ม่วง (Purple)',
+    icon_color: '#c084fc',
+    bg_color: 'rgba(147, 51, 234, 0.2)',
+    border_color: 'rgba(192, 132, 252, 0.3)',
+    dot: '#a855f7',
+  },
+  {
+    name: 'แดง (Rose)',
+    icon_color: '#fb7185',
+    bg_color: 'rgba(244, 63, 94, 0.2)',
+    border_color: 'rgba(251, 113, 133, 0.3)',
+    dot: '#f43f5e',
+  },
+  {
+    name: 'ส้ม (Orange)',
+    icon_color: '#fb923c',
+    bg_color: 'rgba(234, 88, 12, 0.2)',
+    border_color: 'rgba(251, 146, 60, 0.3)',
+    dot: '#f97316',
+  },
+  {
+    name: 'ขาวมินิมอล (White)',
+    icon_color: '#ffffff',
+    bg_color: 'rgba(255, 255, 255, 0.15)',
+    border_color: 'rgba(255, 255, 255, 0.25)',
+    dot: '#e2e8f0',
+  },
+];
+
 export default function Settings() {
   const { user: currentUser } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'store'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'logo' | 'store'>('users');
   const [loading, setLoading] = useState(true);
   const [saveLoading, setSaveLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -125,14 +172,12 @@ export default function Settings() {
   // Role Defaults State
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(DEFAULT_ROLE_PERMS);
 
-  // Store Profile State
-  const [storeInfo, setStoreInfo] = useState<StoreInfo>({
-    name: 'ระบบจัดการคลังและจุดขาย (Smart POS & Warehouse)',
-    tax_id: '',
-    phone: '',
-    address: '',
-    receipt_footer: 'ขอบคุณที่ใช้บริการ / Thank you',
-  });
+  // Store Profile & Logo State
+  const [storeInfo, setStoreInfo] = useState<StoreInfo>(DEFAULT_STORE_INFO);
+  const [logoConfig, setLogoConfig] = useState<LogoConfig>(DEFAULT_STORE_INFO.logo);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const notifySuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -161,6 +206,9 @@ export default function Settings() {
         }
         if (settingsRes.data.store_info) {
           setStoreInfo(settingsRes.data.store_info);
+          if (settingsRes.data.store_info.logo) {
+            setLogoConfig(settingsRes.data.store_info.logo);
+          }
         }
       }
     } catch (err: any) {
@@ -367,12 +415,103 @@ export default function Settings() {
     }
   };
 
+  // Logo File Change Handler
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 5 * 1024 * 1024) {
+        notifyError('ขนาดไฟล์รูปภาพต้องไม่เกิน 5MB');
+        return;
+      }
+      setLogoFile(file);
+      const preview = URL.createObjectURL(file);
+      setLogoPreviewUrl(preview);
+      setLogoConfig(prev => ({
+        ...prev,
+        type: 'image',
+        image_url: preview,
+      }));
+    }
+  };
+
+  // Save Logo & Branding Settings
+  const handleSaveLogo = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      setSaveLoading(true);
+
+      let finalLogo = { ...logoConfig };
+
+      // If a file was chosen, upload via multipart form-data
+      if (logoFile) {
+        const formData = new FormData();
+        formData.append('logo', logoFile);
+        const uploadRes = await api.post('/settings/logo', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (uploadRes.data?.logo_url) {
+          finalLogo.image_url = uploadRes.data.logo_url;
+          finalLogo.type = 'image';
+        }
+        setLogoFile(null);
+      }
+
+      const updatedStoreInfo: StoreInfo = {
+        ...storeInfo,
+        name: finalLogo.store_name || storeInfo.name,
+        logo: finalLogo,
+      };
+
+      const res = await api.put('/settings/store', updatedStoreInfo);
+      setStoreInfo(res.data?.store_info || updatedStoreInfo);
+      setLogoConfig(finalLogo);
+
+      // Sync with global store
+      useSettingsStore.getState().updateStoreInfo(updatedStoreInfo);
+
+      notifySuccess('บันทึกการปรับแต่งโลโก้และแบรนด์ร้านเรียบร้อยแล้ว');
+      await fetchData();
+    } catch (err: any) {
+      notifyError(err.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกโลโก้');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Reset Logo to Default
+  const handleResetLogo = async () => {
+    if (!confirm('คุณต้องการรีเซ็ตโลโก้กลับเป็นค่าเริ่มต้นใช่หรือไม่?')) return;
+    try {
+      setSaveLoading(true);
+      const res = await api.delete('/settings/logo');
+      if (res.data?.store_info) {
+        setStoreInfo(res.data.store_info);
+        if (res.data.store_info.logo) {
+          setLogoConfig(res.data.store_info.logo);
+        }
+      }
+      setLogoFile(null);
+      setLogoPreviewUrl('');
+      useSettingsStore.getState().fetchStoreInfo();
+      notifySuccess('รีเซ็ตโลโก้กลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว');
+    } catch (err: any) {
+      notifyError(err.response?.data?.message || 'เกิดข้อผิดพลาดในการรีเซ็ตโลโก้');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   // Save Store Profile
   const handleSaveStoreProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setSaveLoading(true);
-      await api.put('/settings/store', storeInfo);
+      const updatedStoreInfo = {
+        ...storeInfo,
+        logo: logoConfig,
+      };
+      await api.put('/settings/store', updatedStoreInfo);
+      useSettingsStore.getState().updateStoreInfo(updatedStoreInfo);
       notifySuccess('บันทึกข้อมูลร้านค้าเรียบร้อยแล้ว');
       await fetchData();
     } catch (err: any) {
@@ -457,6 +596,18 @@ export default function Settings() {
         >
           <Shield size={18} />
           <span>สิทธิ์เริ่มต้นตามบทบาท</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('logo')}
+          className={`pb-3 px-4 text-sm font-bold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'logo'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+          }`}
+        >
+          <Palette size={18} />
+          <span>ปรับแต่งโลโก้ & แบรนด์ร้าน</span>
         </button>
 
         <button
@@ -820,7 +971,454 @@ export default function Settings() {
         </div>
       )}
 
-      {/* TAB 3: STORE PROFILE & GENERAL SETTINGS */}
+      {/* TAB: LOGO & BRANDING CUSTOMIZATION */}
+      {activeTab === 'logo' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+                  <Palette size={22} />
+                </span>
+                <h2 className="text-lg font-bold text-slate-800">ปรับแต่งโลโก้ & แบรนด์ร้านค้า</h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-1 max-w-xl">
+                ปรับแต่งโลโก้ ไอคอน สี ขนาด และชื่อร้านค้า โดยจะแสดงผลทันทีบนแถบเมนูด้านซ้าย (Sidebar) แถบมือถือ (Mobile Header) และหน้าเข้าสู่ระบบ (Login)
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetLogo}
+                disabled={saveLoading}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw size={14} />
+                <span>รีเซ็ตเป็นค่าเริ่มต้น</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveLogo}
+                disabled={saveLoading}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 active:scale-95 transition-all shadow-sm text-xs disabled:opacity-50 cursor-pointer"
+              >
+                <Save size={16} />
+                <span>{saveLoading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Grid Layout: Left Settings, Right Live Preview */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Controls (7 cols) */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* Type Selection: Icon vs Image */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <span>1. รูปแบบโลโก้ (Logo Type)</span>
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setLogoConfig(prev => ({ ...prev, type: 'icon' }))}
+                    className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                      logoConfig.type === 'icon'
+                        ? 'border-blue-500 bg-blue-50/50 ring-2 ring-blue-500/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-lg shrink-0 ${logoConfig.type === 'icon' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <Store size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-slate-800">ไอคอนสำเร็จรูป (Preset Icon)</div>
+                      <div className="text-xs text-slate-500 mt-0.5">เลือกจากไอคอนร้านค้า ปรับแต่งสีและพื้นหลังได้อิสระ</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLogoConfig(prev => ({ ...prev, type: 'image' }))}
+                    className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                      logoConfig.type === 'image'
+                        ? 'border-blue-500 bg-blue-50/50 ring-2 ring-blue-500/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-lg shrink-0 ${logoConfig.type === 'image' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <ImageIcon size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-slate-800">อัปโหลดภาพโลโก้ (Upload Image)</div>
+                      <div className="text-xs text-slate-500 mt-0.5">ใช้ไฟล์รูปภาพของร้านคุณเอง เช่น PNG, JPG, SVG</div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Sub-panel depending on type */}
+                {logoConfig.type === 'image' ? (
+                  <div className="pt-3 border-t border-slate-100 space-y-4">
+                    <label className="text-xs font-bold text-slate-700 block">อัปโหลดไฟล์รูปภาพโลโก้ร้านค้า</label>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
+
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/20 rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3"
+                    >
+                      {logoPreviewUrl || logoConfig.image_url ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <img
+                            src={logoPreviewUrl || (logoConfig.image_url.startsWith('http') || logoConfig.image_url.startsWith('/') ? logoConfig.image_url : `/${logoConfig.image_url}`)}
+                            alt="Logo Preview"
+                            className="w-24 h-24 object-contain rounded-xl border border-slate-200 shadow-sm bg-white p-2"
+                          />
+                          <div className="text-xs text-blue-600 font-semibold flex items-center gap-1.5">
+                            <Upload size={14} />
+                            <span>คลิกเพื่อเปลี่ยนรูปภาพใหม่</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <Upload size={28} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-700">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
+                            <p className="text-xs text-slate-400 mt-1">รองรับ PNG, JPG, WEBP, SVG (ขนาดไม่เกิน 5MB, แนะนำสัดส่วน 1:1 จัตุรัส)</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pt-3 border-t border-slate-100 space-y-5">
+                    {/* Choose Icon */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-700 block">เลือกไอคอนร้านค้า</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {Object.entries(ICON_MAP).map(([iconKey, IconComponent]) => {
+                          const isSelected = logoConfig.icon_name === iconKey;
+                          return (
+                            <button
+                              key={iconKey}
+                              type="button"
+                              onClick={() => setLogoConfig(prev => ({ ...prev, icon_name: iconKey }))}
+                              className={`p-3 rounded-xl border flex items-center gap-2.5 text-left transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm font-bold ring-2 ring-blue-400/20'
+                                  : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                              }`}
+                            >
+                              <div
+                                className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                                style={{
+                                  backgroundColor: isSelected ? logoConfig.bg_color : '#f1f5f9',
+                                  color: isSelected ? logoConfig.icon_color : '#64748b',
+                                  border: `1px solid ${isSelected ? logoConfig.border_color : '#e2e8f0'}`,
+                                }}
+                              >
+                                <IconComponent size={18} />
+                              </div>
+                              <span className="text-xs truncate">{iconKey}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Color Presets */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-700 block">โทนสีสำเร็จรูป (Color Presets)</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {COLOR_PRESETS.map((preset) => {
+                          const isActive = logoConfig.icon_color === preset.icon_color && logoConfig.bg_color === preset.bg_color;
+                          return (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => setLogoConfig(prev => ({
+                                ...prev,
+                                icon_color: preset.icon_color,
+                                bg_color: preset.bg_color,
+                                border_color: preset.border_color,
+                              }))}
+                              className={`p-2.5 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all cursor-pointer ${
+                                isActive
+                                  ? 'border-slate-800 bg-slate-900 text-white shadow-sm'
+                                  : 'border-slate-200 hover:border-slate-300 bg-white text-slate-700'
+                              }`}
+                            >
+                              <span
+                                className="w-4 h-4 rounded-full flex-shrink-0 border border-black/10"
+                                style={{ backgroundColor: preset.dot }}
+                              />
+                              <span className="truncate">{preset.name}</span>
+                              {isActive && <Check size={14} className="ml-auto text-emerald-400" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Custom Color Pickers */}
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <label className="text-xs font-bold text-slate-700 block">กำหนดรหัสสีเอง (Custom Colors)</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500 font-medium">สีไอคอน</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={logoConfig.icon_color.startsWith('#') ? logoConfig.icon_color : '#3b82f6'}
+                              onChange={(e) => setLogoConfig(prev => ({ ...prev, icon_color: e.target.value }))}
+                              className="w-9 h-9 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white"
+                            />
+                            <input
+                              type="text"
+                              value={logoConfig.icon_color}
+                              onChange={(e) => setLogoConfig(prev => ({ ...prev, icon_color: e.target.value }))}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500 font-medium">สีพื้นหลัง (RGBA / Hex)</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={logoConfig.bg_color}
+                              onChange={(e) => setLogoConfig(prev => ({ ...prev, bg_color: e.target.value }))}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono"
+                              placeholder="rgba(...) หรือ #hex"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500 font-medium">สีเส้นขอบ (Border)</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={logoConfig.border_color}
+                              onChange={(e) => setLogoConfig(prev => ({ ...prev, border_color: e.target.value }))}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono"
+                              placeholder="rgba(...) หรือ #hex"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Shape and Size Customization */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-5">
+                <h3 className="text-sm font-bold text-slate-800">2. รูปทรง & ขนาดโลโก้ (Shape & Size)</h3>
+
+                {/* Shape options */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 block">รูปทรงขอบของโลโก้ (Shape)</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {[
+                      { key: 'rounded-xl', label: 'โค้งมน (Rounded XL)', sample: 'rounded-xl' },
+                      { key: 'rounded-full', label: 'วงกลม (Circle)', sample: 'rounded-full' },
+                      { key: 'rounded-lg', label: 'มนเล็ก (Rounded LG)', sample: 'rounded-lg' },
+                      { key: 'rounded-none', label: 'เหลี่ยม (Square)', sample: 'rounded-none' },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setLogoConfig(prev => ({ ...prev, shape: item.key as any }))}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-2 text-center transition-all cursor-pointer ${
+                          logoConfig.shape === item.key
+                            ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold ring-2 ring-blue-400/20'
+                            : 'border-slate-200 hover:border-slate-300 text-slate-600 bg-white'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 bg-blue-600 ${item.sample} shadow-sm`} />
+                        <span className="text-[11px] leading-tight">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Size options */}
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <label className="text-xs font-bold text-slate-700 block">ขนาดแสดงผลบน Sidebar (Size)</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {[
+                      { key: 'sm', label: 'เล็ก (Small)', desc: '32px' },
+                      { key: 'md', label: 'กลาง (Medium)', desc: '38px (แนะนำ)' },
+                      { key: 'lg', label: 'ใหญ่ (Large)', desc: '46px' },
+                      { key: 'xl', label: 'ใหญ่มาก (XL)', desc: '56px' },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setLogoConfig(prev => ({ ...prev, size: item.key as any }))}
+                        className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                          logoConfig.size === item.key
+                            ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold ring-2 ring-blue-400/20'
+                            : 'border-slate-200 hover:border-slate-300 text-slate-600 bg-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{item.label}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Branding Text */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <h3 className="text-sm font-bold text-slate-800">3. ข้อความแบรนด์ร้านค้า (Branding Text)</h3>
+
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">ชื่อร้านค้า (Store Name) ที่แสดงใต้/ข้างโลโก้</label>
+                    <input
+                      type="text"
+                      value={logoConfig.store_name}
+                      onChange={(e) => setLogoConfig(prev => ({ ...prev, store_name: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="เช่น Smart POS, ร้านสะดวกซื้อ ก.ไก่"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">คำขวัญ / สโลแกน (Store Slogan / Subtitle)</label>
+                    <input
+                      type="text"
+                      value={logoConfig.store_slogan}
+                      onChange={(e) => setLogoConfig(prev => ({ ...prev, store_slogan: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="เช่น ระบบขายหน้าร้าน & คลังสินค้า"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveLogo}
+                    disabled={saveLoading}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 active:scale-95 transition-all shadow-sm text-sm disabled:opacity-50 cursor-pointer"
+                  >
+                    <Save size={18} />
+                    <span>{saveLoading ? 'กำลังบันทึก...' : 'บันทึกการปรับแต่ง'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Preview Panel (5 cols) - Sticky */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="sticky top-6 space-y-5">
+                <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-lg border border-slate-800 space-y-5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={18} className="text-amber-400" />
+                      <span className="text-sm font-bold">ตัวอย่างการแสดงผลจริง</span>
+                    </div>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Live Preview
+                    </span>
+                  </div>
+
+                  {/* 1. Sidebar Header Preview */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between">
+                      <span>แถบเมนูด้านข้าง (Sidebar Header)</span>
+                      <span className="text-slate-500 font-mono text-[10px]">Desktop</span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-3">
+                      <StoreLogo logo={logoConfig} />
+                      <div className="min-w-0">
+                        <div className="font-black text-sm text-white tracking-wide truncate">
+                          {logoConfig.store_name || 'POS System'}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {logoConfig.store_slogan || 'ระบบจัดการร้านค้า'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Mobile Header Preview */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between">
+                      <span>แถบด้านบนมือถือ (Mobile Header)</span>
+                      <span className="text-slate-500 font-mono text-[10px]">Mobile</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-xs">
+                          ☰
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StoreLogo logo={logoConfig} size="sm" />
+                          <span className="font-bold text-xs text-white truncate max-w-[120px]">
+                            {logoConfig.store_name || 'POS System'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-7 h-7 rounded-full bg-blue-600/30 border border-blue-500/50 flex items-center justify-center text-[10px] text-blue-400 font-bold">
+                        A
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Login Page Header Preview */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between">
+                      <span>หน้าเข้าสู่ระบบ (Login Page)</span>
+                      <span className="text-slate-500 font-mono text-[10px]">Login</span>
+                    </div>
+                    <div className="p-6 rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center text-center">
+                      <div className="mb-3">
+                        <StoreLogo logo={logoConfig} size="xl" />
+                      </div>
+                      <div className="text-lg font-black text-white">
+                        {logoConfig.store_name || 'POS System'}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {logoConfig.store_slogan || 'ระบบจัดการขายหน้าร้าน'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Helpful note */}
+                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-800 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-blue-900">
+                    <CheckCircle2 size={16} className="text-blue-600" />
+                    <span>ซิงค์แบบเรียลไทม์ทันที</span>
+                  </div>
+                  <p className="text-blue-700 leading-relaxed text-[11px]">
+                    เมื่อกดปุ่มบันทึก ระบบจะอัปเดตโลโก้และชื่อร้านค้าบนทุกหน้าต่างที่เปิดอยู่ทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: STORE PROFILE & GENERAL SETTINGS */}
       {activeTab === 'store' && (
         <form onSubmit={handleSaveStoreProfile} className="max-w-3xl space-y-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           <div>

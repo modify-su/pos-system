@@ -1,8 +1,56 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { run, get, all } = require('../db/database');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { emitEvent } = require('../realtime');
 
 const router = express.Router();
+
+// Multer storage for store logos
+const uploadsDir = process.env.UPLOADS_DIR ? path.resolve(process.env.UPLOADS_DIR) : path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'logo-' + uniqueSuffix + ext);
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|webp|gif|svg/;
+    const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+    const mime = file.mimetype;
+    if (allowed.test(ext) || mime.startsWith('image/')) {
+      return cb(null, true);
+    }
+    cb(new Error('รองรับเฉพาะไฟล์รูปภาพ (JPG, PNG, WEBP, GIF, SVG) เท่านั้น'));
+  },
+});
+
+const DEFAULT_LOGO = {
+  type: 'icon',
+  image_url: '',
+  icon_name: 'Store',
+  icon_color: '#60a5fa',
+  bg_color: 'rgba(37, 99, 235, 0.2)',
+  border_color: 'rgba(59, 130, 246, 0.3)',
+  size: 'md',
+  shape: 'rounded-xl',
+  store_name: 'POS System',
+  store_slogan: 'ระบบจัดการร้านค้า',
+};
 
 /**
  * GET /api/settings
@@ -29,13 +77,17 @@ router.get('/', authenticate, async (req, res) => {
 
 /**
  * GET /api/settings/store
- * Fetch store information (for receipts and invoices)
+ * Fetch store information (for receipts, invoices, and branding)
  */
 router.get('/store', async (req, res) => {
   try {
     const row = await get('SELECT value FROM settings WHERE key = "store_info"');
     if (row && row.value) {
-      return res.json(JSON.parse(row.value));
+      const data = JSON.parse(row.value);
+      if (!data.logo) {
+        data.logo = { ...DEFAULT_LOGO, store_name: data.name || 'POS System' };
+      }
+      return res.json(data);
     }
     res.json({
       name: 'Smart POS & Warehouse',
@@ -43,6 +95,7 @@ router.get('/store', async (req, res) => {
       address: '',
       tax_id: '',
       receipt_footer: 'ขอบคุณที่ใช้บริการ',
+      logo: DEFAULT_LOGO,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -82,6 +135,8 @@ router.put('/roles', authenticate, requireRole('admin'), async (req, res) => {
       await run('INSERT INTO settings (key, value) VALUES ("role_permissions", ?)', [valueStr]);
     }
 
+    emitEvent('settings:updated', { role_permissions: rolePermissions });
+
     res.json({
       message: 'บันทึกสิทธิ์เริ่มต้นของบทบาทเรียบร้อยแล้ว',
       role_permissions: rolePermissions,
@@ -93,7 +148,7 @@ router.put('/roles', authenticate, requireRole('admin'), async (req, res) => {
 
 /**
  * PUT /api/settings/store
- * Update store info (Admin only)
+ * Update store info & logo branding (Admin only)
  */
 router.put('/store', authenticate, requireRole('admin'), async (req, res) => {
   try {
@@ -101,6 +156,11 @@ router.put('/store', authenticate, requireRole('admin'), async (req, res) => {
 
     if (!storeInfo || typeof storeInfo !== 'object') {
       return res.status(400).json({ message: 'รูปแบบข้อมูลร้านค้าไม่ถูกต้อง' });
+    }
+
+    // Ensure logo object exists with default fallbacks
+    if (!storeInfo.logo) {
+      storeInfo.logo = { ...DEFAULT_LOGO, store_name: storeInfo.name || 'POS System' };
     }
 
     const valueStr = JSON.stringify(storeInfo);
@@ -112,8 +172,113 @@ router.put('/store', authenticate, requireRole('admin'), async (req, res) => {
       await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
     }
 
+    // Emit realtime event to notify all connected clients
+    emitEvent('settings:updated', storeInfo);
+
     res.json({
-      message: 'บันทึกข้อมูลร้านค้าเรียบร้อยแล้ว',
+      message: 'บันทึกข้อมูลร้านค้าและโลโก้เรียบร้อยแล้ว',
+      store_info: storeInfo,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * POST /api/settings/logo
+ * Upload store logo image (Admin only)
+ */
+router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'กรุณาเลือกไฟล์รูปภาพโลโก้' });
+    }
+
+    const logoUrl = `/uploads/${req.file.filename}`;
+
+    // Load existing store_info
+    let storeInfo = {
+      name: 'Smart POS & Warehouse',
+      phone: '',
+      address: '',
+      tax_id: '',
+      receipt_footer: 'ขอบคุณที่ใช้บริการ',
+      logo: { ...DEFAULT_LOGO },
+    };
+
+    const row = await get('SELECT value FROM settings WHERE key = "store_info"');
+    if (row && row.value) {
+      try {
+        storeInfo = JSON.parse(row.value);
+      } catch {}
+    }
+
+    if (!storeInfo.logo) {
+      storeInfo.logo = { ...DEFAULT_LOGO };
+    }
+
+    storeInfo.logo.type = 'image';
+    storeInfo.logo.image_url = logoUrl;
+
+    const valueStr = JSON.stringify(storeInfo);
+    if (row) {
+      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "store_info"', [valueStr]);
+    } else {
+      await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
+    }
+
+    // Emit realtime event
+    emitEvent('settings:updated', storeInfo);
+
+    res.json({
+      message: 'อัปโหลดรูปภาพโลโก้สำเร็จ',
+      logo_url: logoUrl,
+      store_info: storeInfo,
+    });
+  } catch (err) {
+    console.error('Upload logo error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ' });
+  }
+});
+
+/**
+ * DELETE /api/settings/logo
+ * Reset logo to default icon (Admin only)
+ */
+router.delete('/logo', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const row = await get('SELECT value FROM settings WHERE key = "store_info"');
+    let storeInfo = {
+      name: 'Smart POS & Warehouse',
+      phone: '',
+      address: '',
+      tax_id: '',
+      receipt_footer: 'ขอบคุณที่ใช้บริการ',
+      logo: { ...DEFAULT_LOGO },
+    };
+
+    if (row && row.value) {
+      try {
+        storeInfo = JSON.parse(row.value);
+      } catch {}
+    }
+
+    if (storeInfo.logo) {
+      storeInfo.logo.type = 'icon';
+      storeInfo.logo.image_url = '';
+    }
+
+    const valueStr = JSON.stringify(storeInfo);
+    if (row) {
+      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "store_info"', [valueStr]);
+    } else {
+      await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
+    }
+
+    emitEvent('settings:updated', storeInfo);
+
+    res.json({
+      message: 'รีเซ็ตโลโก้เป็นค่าเริ่มต้นเรียบร้อยแล้ว',
       store_info: storeInfo,
     });
   } catch (err) {
