@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const memoryCache = require('./utils/cache');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pos_secret_key_2024';
 
@@ -113,6 +114,21 @@ function parseCookies(str) {
  * Broadcast an event to all connected clients
  */
 function emitEvent(event, data) {
+  // Invalidate in-memory caches on mutations
+  if (
+    event === 'dashboard:refresh' ||
+    event.startsWith('sale:') ||
+    event.startsWith('inventory:') ||
+    event.startsWith('product:') ||
+    event.startsWith('requisition:')
+  ) {
+    memoryCache.del('dashboard_summary');
+  }
+
+  if (event.startsWith('product:') || event.startsWith('inventory:')) {
+    memoryCache.clearPrefix('products_');
+  }
+
   if (io) {
     io.emit(event, {
       ...data,

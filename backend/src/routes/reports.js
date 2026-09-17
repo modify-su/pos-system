@@ -1,126 +1,158 @@
 const express = require('express');
 const { get, all } = require('../db/database');
 const { authenticate } = require('../middleware/auth');
+const memoryCache = require('../utils/cache');
 
 const router = express.Router();
 
 // GET /api/reports/dashboard
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
+    const cacheKey = 'dashboard_summary';
+    const cachedData = memoryCache.get(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
     const today = new Date().toISOString().slice(0, 10);
     const thisMonth = today.slice(0, 7);
     const lastMonth = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 7);
 
-    const [todaySales, monthSales, lastMonthSales, totalProducts, lowStock, pendingReqs] = await Promise.all([
-      get(`SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count FROM sales WHERE date(created_at) = ? AND status='completed'`, [today]),
-      get(`SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count FROM sales WHERE strftime('%Y-%m', created_at) = ? AND status='completed'`, [thisMonth]),
-      get(`SELECT COALESCE(SUM(total), 0) as total FROM sales WHERE strftime('%Y-%m', created_at) = ? AND status='completed'`, [lastMonth]),
-      get('SELECT COUNT(*) as count FROM products WHERE active=1'),
-      get('SELECT COUNT(*) as count FROM products WHERE active=1 AND stock_qty <= min_stock'),
-      get(`SELECT COUNT(*) as count FROM stock_requisitions WHERE status='pending'`),
+    const [metrics, dailySales, topProducts, paymentMethods, categoryRevenue, recentMovements, pendingRequisitionsList] = await Promise.all([
+      // 1. All scalar metrics in 1 single consolidated query
+      get(`
+        SELECT
+          (SELECT COALESCE(SUM(total), 0) FROM sales WHERE status = 'completed' AND date(created_at) = ?) as today_revenue,
+          (SELECT COUNT(*) FROM sales WHERE status = 'completed' AND date(created_at) = ?) as today_count,
+          (SELECT COALESCE(SUM(total), 0) FROM sales WHERE status = 'completed' AND strftime('%Y-%m', created_at) = ?) as month_revenue,
+          (SELECT COUNT(*) FROM sales WHERE status = 'completed' AND strftime('%Y-%m', created_at) = ?) as month_count,
+          (SELECT COALESCE(SUM(total), 0) FROM sales WHERE status = 'completed' AND strftime('%Y-%m', created_at) = ?) as last_month_revenue,
+
+          (SELECT COALESCE(SUM(si.qty * (si.unit_price - si.cost_price)), 0) 
+           FROM sale_items si JOIN sales s ON si.sale_id = s.id 
+           WHERE s.status = 'completed' AND date(s.created_at) = ?) as profit_today,
+          (SELECT COALESCE(SUM(si.qty * (si.unit_price - si.cost_price)), 0) 
+           FROM sale_items si JOIN sales s ON si.sale_id = s.id 
+           WHERE s.status = 'completed' AND strftime('%Y-%m', s.created_at) = ?) as profit_month,
+
+          (SELECT COUNT(*) FROM products WHERE active = 1) as total_products,
+          (SELECT COUNT(*) FROM products WHERE active = 1 AND stock_qty <= min_stock) as low_stock,
+          (SELECT COUNT(*) FROM stock_requisitions WHERE status = 'pending') as pending_reqs,
+
+          (SELECT COUNT(*) FROM purchase_orders WHERE status = 'completed' AND strftime('%Y-%m', created_at) = ?) as stock_in_month_count,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM purchase_orders WHERE status = 'completed' AND strftime('%Y-%m', created_at) = ?) as stock_in_month_total,
+          (SELECT COUNT(*) FROM purchase_orders WHERE status = 'completed' AND date(created_at) = ?) as stock_in_today_count,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM purchase_orders WHERE status = 'completed' AND date(created_at) = ?) as stock_in_today_total,
+
+          (SELECT COUNT(DISTINCT r.id) FROM stock_requisitions r WHERE r.status = 'approved' AND strftime('%Y-%m', r.created_at) = ?) as stock_out_month_count,
+          (SELECT COALESCE(SUM(ri.qty_approved), 0) FROM stock_requisitions r JOIN requisition_items ri ON r.id = ri.req_id WHERE r.status = 'approved' AND strftime('%Y-%m', r.created_at) = ?) as stock_out_month_qty,
+          (SELECT COUNT(DISTINCT r.id) FROM stock_requisitions r WHERE r.status = 'approved' AND date(r.created_at) = ?) as stock_out_today_count,
+          (SELECT COALESCE(SUM(ri.qty_approved), 0) FROM stock_requisitions r JOIN requisition_items ri ON r.id = ri.req_id WHERE r.status = 'approved' AND date(r.created_at) = ?) as stock_out_today_qty
+      `, [
+        today, today, thisMonth, thisMonth, lastMonth,
+        today, thisMonth,
+        thisMonth, thisMonth, today, today,
+        thisMonth, thisMonth, today, today
+      ]),
+
+      // 2. Daily sales last 14 days
+      all(`
+        SELECT s.sale_date as date, 
+               SUM(s.total) as revenue,
+               SUM(s.total - COALESCE(cost.total_cost, 0)) as profit,
+               COUNT(*) as count
+        FROM (
+          SELECT id, total, date(created_at) as sale_date
+          FROM sales
+          WHERE date(created_at) >= date('now', '-13 days') AND status = 'completed'
+        ) s
+        LEFT JOIN (
+          SELECT sale_id, SUM(qty * cost_price) as total_cost
+          FROM sale_items
+          GROUP BY sale_id
+        ) cost ON s.id = cost.sale_id
+        GROUP BY s.sale_date ORDER BY s.sale_date
+      `),
+
+      // 3. Top 10 products this month
+      all(`
+        SELECT si.product_name, si.product_id, SUM(si.qty) as total_qty, SUM(si.subtotal) as total_revenue
+        FROM sale_items si JOIN sales s ON si.sale_id = s.id
+        WHERE strftime('%Y-%m', s.created_at) = ? AND s.status = 'completed'
+        GROUP BY si.product_id, si.product_name ORDER BY total_qty DESC LIMIT 10
+      `, [thisMonth]),
+
+      // 4. Sales by payment method
+      all(`
+        SELECT payment_method, COUNT(*) as count, SUM(total) as total
+        FROM sales WHERE strftime('%Y-%m', created_at) = ? AND status = 'completed'
+        GROUP BY payment_method
+      `, [thisMonth]),
+
+      // 5. Category revenue
+      all(`
+        SELECT c.name as category, SUM(si.subtotal) as revenue
+        FROM sale_items si 
+        JOIN products p ON si.product_id = p.id 
+        JOIN categories c ON p.category_id = c.id
+        JOIN sales s ON si.sale_id = s.id
+        WHERE strftime('%Y-%m', s.created_at) = ? AND s.status = 'completed'
+        GROUP BY c.id, c.name ORDER BY revenue DESC
+      `, [thisMonth]),
+
+      // 6. Recent stock movements
+      all(`
+        SELECT m.id, m.type, m.qty, m.qty_before, m.qty_after, m.ref_type, m.ref_id, m.note, m.created_at, p.name as product_name, p.barcode, p.unit, u.name as user_name
+        FROM stock_movements m
+        LEFT JOIN products p ON m.product_id = p.id
+        LEFT JOIN users u ON m.user_id = u.id
+        ORDER BY m.created_at DESC, m.id DESC LIMIT 8
+      `),
+
+      // 7. Pending requisitions
+      all(`
+        SELECT r.id, r.req_no, r.reason, r.note, r.created_at, u.name as requester_name,
+               (SELECT COUNT(*) FROM requisition_items ri WHERE ri.req_id = r.id) as item_count,
+               (SELECT COALESCE(SUM(qty_requested), 0) FROM requisition_items ri WHERE ri.req_id = r.id) as total_requested_qty
+        FROM stock_requisitions r
+        LEFT JOIN users u ON r.user_id = u.id
+        WHERE r.status = 'pending'
+        ORDER BY r.created_at DESC LIMIT 5
+      `)
     ]);
 
-    // Profit (gross)
-    const profitToday = await get(
-      `SELECT COALESCE(SUM(si.qty * (si.unit_price - si.cost_price)), 0) as profit
-       FROM sale_items si JOIN sales s ON si.sale_id = s.id
-       WHERE date(s.created_at) = ? AND s.status='completed'`,
-      [today]
-    );
-    const profitMonth = await get(
-      `SELECT COALESCE(SUM(si.qty * (si.unit_price - si.cost_price)), 0) as profit
-       FROM sale_items si JOIN sales s ON si.sale_id = s.id
-       WHERE strftime('%Y-%m', s.created_at) = ? AND s.status='completed'`,
-      [thisMonth]
-    );
+    const m = metrics || {};
+    const todayRevenue = m.today_revenue || 0;
+    const todayCount = m.today_count || 0;
+    const profitToday = m.profit_today || 0;
 
-    // Daily sales last 14 days
-    const dailySales = await all(
-      `SELECT s.sale_date as date, 
-              SUM(s.total) as revenue,
-              SUM(s.total - COALESCE(cost.total_cost, 0)) as profit,
-              COUNT(*) as count
-       FROM (
-         SELECT id, total, date(created_at) as sale_date
-         FROM sales
-         WHERE date(created_at) >= date('now', '-13 days') AND status='completed'
-       ) s
-       LEFT JOIN (
-         SELECT sale_id, SUM(qty * cost_price) as total_cost
-         FROM sale_items
-         GROUP BY sale_id
-       ) cost ON s.id = cost.sale_id
-       GROUP BY s.sale_date ORDER BY s.sale_date`
-    );
+    const monthRevenue = m.month_revenue || 0;
+    const monthCount = m.month_count || 0;
+    const profitMonth = m.profit_month || 0;
+    const lastMonthRevenue = m.last_month_revenue || 0;
 
-    // Top 10 products this month
-    const topProducts = await all(
-      `SELECT si.product_name, si.product_id, SUM(si.qty) as total_qty, SUM(si.subtotal) as total_revenue
-       FROM sale_items si JOIN sales s ON si.sale_id = s.id
-       WHERE strftime('%Y-%m', s.created_at) = ? AND s.status='completed'
-       GROUP BY si.product_id, si.product_name ORDER BY total_qty DESC LIMIT 10`,
-      [thisMonth]
-    );
+    const growth = lastMonthRevenue > 0
+      ? (((monthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100).toFixed(1)
+      : 0;
 
-    // Sales by payment method
-    const paymentMethods = await all(
-      `SELECT payment_method, COUNT(*) as count, SUM(total) as total
-       FROM sales WHERE strftime('%Y-%m', created_at) = ? AND status='completed'
-       GROUP BY payment_method`,
-      [thisMonth]
-    );
-
-    // Category revenue
-    const categoryRevenue = await all(
-      `SELECT c.name as category, SUM(si.subtotal) as revenue
-       FROM sale_items si 
-       JOIN products p ON si.product_id = p.id 
-       JOIN categories c ON p.category_id = c.id
-       JOIN sales s ON si.sale_id = s.id
-       WHERE strftime('%Y-%m', s.created_at) = ? AND s.status='completed'
-       GROUP BY c.id, c.name ORDER BY revenue DESC`,
-      [thisMonth]
-    );
-
-    // Warehouse Stock-In & Stock-Out Analytics
-    const [
-      stockInMonth,
-      stockOutMonth,
-      stockInToday,
-      stockOutToday,
-      recentMovements,
-      pendingRequisitionsList
-    ] = await Promise.all([
-      get(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total FROM purchase_orders WHERE strftime('%Y-%m', created_at) = ? AND status='completed'`, [thisMonth]),
-      get(`SELECT COUNT(DISTINCT r.id) as count, COALESCE(SUM(ri.qty_approved), 0) as total_qty FROM stock_requisitions r JOIN requisition_items ri ON r.id = ri.req_id WHERE strftime('%Y-%m', r.created_at) = ? AND r.status='approved'`, [thisMonth]),
-      get(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total FROM purchase_orders WHERE date(created_at) = ? AND status='completed'`, [today]),
-      get(`SELECT COUNT(DISTINCT r.id) as count, COALESCE(SUM(ri.qty_approved), 0) as total_qty FROM stock_requisitions r JOIN requisition_items ri ON r.id = ri.req_id WHERE date(r.created_at) = ? AND r.status='approved'`, [today]),
-      all(`SELECT m.id, m.type, m.qty, m.qty_before, m.qty_after, m.ref_type, m.ref_id, m.note, m.created_at, p.name as product_name, p.barcode, p.unit, u.name as user_name
-           FROM stock_movements m
-           LEFT JOIN products p ON m.product_id = p.id
-           LEFT JOIN users u ON m.user_id = u.id
-           ORDER BY m.created_at DESC, m.id DESC LIMIT 8`),
-      all(`SELECT r.id, r.req_no, r.reason, r.note, r.created_at, u.name as requester_name,
-                  (SELECT COUNT(*) FROM requisition_items ri WHERE ri.req_id = r.id) as item_count,
-                  (SELECT COALESCE(SUM(qty_requested), 0) FROM requisition_items ri WHERE ri.req_id = r.id) as total_requested_qty
-           FROM stock_requisitions r
-           LEFT JOIN users u ON r.user_id = u.id
-           WHERE r.status = 'pending'
-           ORDER BY r.created_at DESC LIMIT 5`)
-    ]);
-
-    res.json({
-      today: { revenue: todaySales.total, count: todaySales.count, profit: profitToday.profit },
+    const responseData = {
+      today: { revenue: todayRevenue, count: todayCount, profit: profitToday },
       thisMonth: {
-        revenue: monthSales.total, count: monthSales.count, profit: profitMonth.profit,
-        growth: lastMonthSales.total > 0 ? ((monthSales.total - lastMonthSales.total) / lastMonthSales.total * 100).toFixed(1) : 0
+        revenue: monthRevenue,
+        count: monthCount,
+        profit: profitMonth,
+        growth,
       },
-      inventory: { totalProducts: totalProducts.count, lowStock: lowStock.count, pendingReqs: pendingReqs.count },
+      inventory: {
+        totalProducts: m.total_products || 0,
+        lowStock: m.low_stock || 0,
+        pendingReqs: m.pending_reqs || 0,
+      },
       warehouse: {
-        stockInMonth: { count: stockInMonth.count, total: stockInMonth.total },
-        stockOutMonth: { count: stockOutMonth.count, totalQty: stockOutMonth.total_qty },
-        stockInToday: { count: stockInToday.count, total: stockInToday.total },
-        stockOutToday: { count: stockOutToday.count, totalQty: stockOutToday.total_qty },
+        stockInMonth: { count: m.stock_in_month_count || 0, total: m.stock_in_month_total || 0 },
+        stockOutMonth: { count: m.stock_out_month_count || 0, totalQty: m.stock_out_month_qty || 0 },
+        stockInToday: { count: m.stock_in_today_count || 0, total: m.stock_in_today_total || 0 },
+        stockOutToday: { count: m.stock_out_today_count || 0, totalQty: m.stock_out_today_qty || 0 },
         recentMovements,
         pendingRequisitions: pendingRequisitionsList,
       },
@@ -128,7 +160,10 @@ router.get('/dashboard', authenticate, async (req, res) => {
       topProducts,
       paymentMethods,
       categoryRevenue,
-    });
+    };
+
+    memoryCache.set(cacheKey, responseData, 30000); // 30s micro-cache
+    res.json(responseData);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

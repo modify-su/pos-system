@@ -6,6 +6,7 @@ const multer = require('multer');
 const { run, get, all } = require('../db/database');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { emitEvent } = require('../realtime');
+const memoryCache = require('../utils/cache');
 
 const router = express.Router();
 
@@ -83,6 +84,9 @@ const DEFAULT_LOGO = {
  */
 router.get('/', authenticate, async (req, res) => {
   try {
+    const cached = memoryCache.get('all_settings');
+    if (cached) return res.json(cached);
+
     const rows = await all('SELECT key, value, updated_at FROM settings');
     const settings = {};
 
@@ -94,6 +98,7 @@ router.get('/', authenticate, async (req, res) => {
       }
     });
 
+    memoryCache.set('all_settings', settings, 600000); // 10 minutes cache
     res.json(settings);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -106,22 +111,28 @@ router.get('/', authenticate, async (req, res) => {
  */
 router.get('/store', async (req, res) => {
   try {
+    const cached = memoryCache.get('store_info');
+    if (cached) return res.json(cached);
+
     const row = await get("SELECT value FROM settings WHERE key = 'store_info'");
     if (row && row.value) {
       const data = JSON.parse(row.value);
       if (!data.logo) {
         data.logo = { ...DEFAULT_LOGO, store_name: data.name || 'POS System' };
       }
+      memoryCache.set('store_info', data, 600000); // 10 minutes cache
       return res.json(data);
     }
-    res.json({
+    const defaultData = {
       name: 'Smart POS & Warehouse',
       phone: '',
       address: '',
       tax_id: '',
       receipt_footer: 'ขอบคุณที่ใช้บริการ',
       logo: DEFAULT_LOGO,
-    });
+    };
+    memoryCache.set('store_info', defaultData, 600000);
+    res.json(defaultData);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -161,6 +172,7 @@ router.put('/roles', authenticate, requireRole('admin'), async (req, res) => {
     }
 
     emitEvent('settings:updated', { role_permissions: rolePermissions });
+    memoryCache.del('all_settings');
 
     res.json({
       message: 'บันทึกสิทธิ์เริ่มต้นของบทบาทเรียบร้อยแล้ว',
@@ -196,6 +208,9 @@ router.put('/store', authenticate, requireRole('admin'), async (req, res) => {
     } else {
       await run("INSERT INTO settings (key, value) VALUES ('store_info', ?)", [valueStr]);
     }
+
+    memoryCache.set('store_info', storeInfo, 600000);
+    memoryCache.del('all_settings');
 
     // Emit realtime event to notify all connected clients
     emitEvent('settings:updated', storeInfo);

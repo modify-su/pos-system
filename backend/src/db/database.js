@@ -24,9 +24,10 @@ function initPostgresPool() {
       ssl: process.env.DATABASE_SSL === 'false' || isLocal
         ? false
         : { rejectUnauthorized: false },
-      max: parseInt(process.env.DB_POOL_MAX || '10', 10),
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 7000,
+      max: parseInt(process.env.DB_POOL_MAX || '15', 10),
+      idleTimeoutMillis: 120000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
     });
 
     pool.on('error', (err) => {
@@ -295,6 +296,20 @@ async function initializePostgresSchema() {
       qty_approved INTEGER DEFAULT 0,
       note TEXT
     );
+
+    -- Performance Indexes for Fast Analytics and Lookups
+    CREATE INDEX IF NOT EXISTS idx_sales_created_status ON sales(created_at, status);
+    CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
+    CREATE INDEX IF NOT EXISTS idx_products_active ON products(active);
+    CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id, active);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+    CREATE INDEX IF NOT EXISTS idx_po_created_status ON purchase_orders(created_at, status);
+    CREATE INDEX IF NOT EXISTS idx_po_items_po_id ON po_items(po_id);
+    CREATE INDEX IF NOT EXISTS idx_requisitions_status_created ON stock_requisitions(status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_requisition_items_req ON requisition_items(req_id);
   `);
 
   // Seed default settings if empty
@@ -507,6 +522,17 @@ async function initializeSqliteSchema() {
     FOREIGN KEY (product_id) REFERENCES products(id)
   )`);
 
+  // Performance Indexes for SQLite
+  await run(`CREATE INDEX IF NOT EXISTS idx_sales_created_status ON sales(created_at, status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_products_active ON products(active)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, active)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_po_created_status ON purchase_orders(created_at, status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_requisitions_status ON stock_requisitions(status)`);
+
   // Seed default settings if empty
   const defaultRoles = {
     admin: ['dashboard', 'pos', 'inventory', 'stock-in', 'stock-out', 'products', 'categories', 'reports', 'settings'],
@@ -560,6 +586,8 @@ async function initializeDatabase() {
     try {
       initPostgresPool();
       await initializePostgresSchema();
+      // Pre-warm connections so first client requests don't suffer TLS/handshake lag
+      await pool.query('SELECT 1');
     } catch (err) {
       console.warn(`⚠️ ไม่สามารถเชื่อมต่อ Cloud PostgreSQL ได้ (${err.message})`);
       console.warn('🔄 กำลังสลับใช้งาน SQLite ในเครื่อง (โหมดออฟไลน์) แทน เพื่อให้ระบบขายหน้าร้านทำงานได้ตลอดเวลา');
