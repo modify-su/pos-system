@@ -87,7 +87,7 @@ router.get('/', authenticate, async (req, res) => {
  */
 router.get('/store', async (req, res) => {
   try {
-    const row = await get('SELECT value FROM settings WHERE key = "store_info"');
+    const row = await get("SELECT value FROM settings WHERE key = 'store_info'");
     if (row && row.value) {
       const data = JSON.parse(row.value);
       if (!data.logo) {
@@ -134,11 +134,11 @@ router.put('/roles', authenticate, requireRole('admin'), async (req, res) => {
 
     const valueStr = JSON.stringify(rolePermissions);
 
-    const existing = await get('SELECT key FROM settings WHERE key = "role_permissions"');
+    const existing = await get("SELECT key FROM settings WHERE key = 'role_permissions'");
     if (existing) {
-      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "role_permissions"', [valueStr]);
+      await run("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'role_permissions'", [valueStr]);
     } else {
-      await run('INSERT INTO settings (key, value) VALUES ("role_permissions", ?)', [valueStr]);
+      await run("INSERT INTO settings (key, value) VALUES ('role_permissions', ?)", [valueStr]);
     }
 
     emitEvent('settings:updated', { role_permissions: rolePermissions });
@@ -171,11 +171,11 @@ router.put('/store', authenticate, requireRole('admin'), async (req, res) => {
 
     const valueStr = JSON.stringify(storeInfo);
 
-    const existing = await get('SELECT key FROM settings WHERE key = "store_info"');
+    const existing = await get("SELECT key FROM settings WHERE key = 'store_info'");
     if (existing) {
-      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "store_info"', [valueStr]);
+      await run("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'store_info'", [valueStr]);
     } else {
-      await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
+      await run("INSERT INTO settings (key, value) VALUES ('store_info', ?)", [valueStr]);
     }
 
     // Emit realtime event to notify all connected clients
@@ -212,7 +212,7 @@ router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), 
       logo: { ...DEFAULT_LOGO },
     };
 
-    const row = await get('SELECT value FROM settings WHERE key = "store_info"');
+    const row = await get("SELECT value FROM settings WHERE key = 'store_info'");
     if (row && row.value) {
       try {
         storeInfo = JSON.parse(row.value);
@@ -228,9 +228,9 @@ router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), 
 
     const valueStr = JSON.stringify(storeInfo);
     if (row) {
-      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "store_info"', [valueStr]);
+      await run("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'store_info'", [valueStr]);
     } else {
-      await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
+      await run("INSERT INTO settings (key, value) VALUES ('store_info', ?)", [valueStr]);
     }
 
     // Emit realtime event
@@ -253,7 +253,7 @@ router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), 
  */
 router.delete('/logo', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const row = await get('SELECT value FROM settings WHERE key = "store_info"');
+    const row = await get("SELECT value FROM settings WHERE key = 'store_info'");
     let storeInfo = {
       name: 'Smart POS & Warehouse',
       phone: '',
@@ -276,9 +276,9 @@ router.delete('/logo', authenticate, requireRole('admin'), async (req, res) => {
 
     const valueStr = JSON.stringify(storeInfo);
     if (row) {
-      await run('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = "store_info"', [valueStr]);
+      await run("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'store_info'", [valueStr]);
     } else {
-      await run('INSERT INTO settings (key, value) VALUES ("store_info", ?)', [valueStr]);
+      await run("INSERT INTO settings (key, value) VALUES ('store_info', ?)", [valueStr]);
     }
 
     emitEvent('settings:updated', storeInfo);

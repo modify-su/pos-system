@@ -64,7 +64,7 @@ async function resolveUserPermissions(user) {
 
   // Fetch role default template from settings table
   try {
-    const roleSetting = await get('SELECT value FROM settings WHERE key = "role_permissions"');
+    const roleSetting = await get("SELECT value FROM settings WHERE key = 'role_permissions'");
     if (roleSetting && roleSetting.value) {
       const roleMap = JSON.parse(roleSetting.value);
       if (roleMap[user.role] && Array.isArray(roleMap[user.role])) {

@@ -36,12 +36,21 @@ router.get('/dashboard', authenticate, async (req, res) => {
 
     // Daily sales last 14 days
     const dailySales = await all(
-      `SELECT date(created_at) as date, 
-              SUM(total) as revenue,
-              SUM(total) - COALESCE((SELECT SUM(si2.qty * si2.cost_price) FROM sale_items si2 JOIN sales s2 ON si2.sale_id = s2.id WHERE date(s2.created_at) = date(sales.created_at)), 0) as profit,
+      `SELECT s.sale_date as date, 
+              SUM(s.total) as revenue,
+              SUM(s.total - COALESCE(cost.total_cost, 0)) as profit,
               COUNT(*) as count
-       FROM sales WHERE date(created_at) >= date('now', '-13 days') AND status='completed'
-       GROUP BY date(created_at) ORDER BY date`
+       FROM (
+         SELECT id, total, date(created_at) as sale_date
+         FROM sales
+         WHERE date(created_at) >= date('now', '-13 days') AND status='completed'
+       ) s
+       LEFT JOIN (
+         SELECT sale_id, SUM(qty * cost_price) as total_cost
+         FROM sale_items
+         GROUP BY sale_id
+       ) cost ON s.id = cost.sale_id
+       GROUP BY s.sale_date ORDER BY s.sale_date`
     );
 
     // Top 10 products this month
@@ -49,7 +58,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       `SELECT si.product_name, si.product_id, SUM(si.qty) as total_qty, SUM(si.subtotal) as total_revenue
        FROM sale_items si JOIN sales s ON si.sale_id = s.id
        WHERE strftime('%Y-%m', s.created_at) = ? AND s.status='completed'
-       GROUP BY si.product_id ORDER BY total_qty DESC LIMIT 10`,
+       GROUP BY si.product_id, si.product_name ORDER BY total_qty DESC LIMIT 10`,
       [thisMonth]
     );
 
@@ -69,7 +78,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
        JOIN categories c ON p.category_id = c.id
        JOIN sales s ON si.sale_id = s.id
        WHERE strftime('%Y-%m', s.created_at) = ? AND s.status='completed'
-       GROUP BY c.id ORDER BY revenue DESC`,
+       GROUP BY c.id, c.name ORDER BY revenue DESC`,
       [thisMonth]
     );
 
