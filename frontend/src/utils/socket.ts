@@ -9,7 +9,7 @@ let socket: Socket | null = null;
  */
 export function getSocketUrl(): string {
   if (typeof window === 'undefined') return '/';
-  if (window.location.port === '5173') {
+  if (window.location.port.startsWith('517')) {
     return `${window.location.protocol}//${window.location.hostname}:3001`;
   }
   return window.location.origin;
