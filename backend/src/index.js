@@ -1,10 +1,18 @@
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// Always load backend/.env reliably regardless of execution working directory
+const backendEnvPath = path.resolve(__dirname, '../.env');
+if (fs.existsSync(backendEnvPath)) {
+  require('dotenv').config({ path: backendEnvPath });
+}
+require('dotenv').config(); // Fallback to current working directory .env if present
+
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const path = require('path');
-const fs = require('fs');
 const { initializeDatabase } = require('./db/database');
 const { initRealtime } = require('./realtime');
 
@@ -42,11 +50,22 @@ app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-const uploadsPath = process.env.UPLOADS_DIR ? path.resolve(process.env.UPLOADS_DIR) : path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-}
-app.use('/uploads', express.static(uploadsPath));
+// Static file serving for uploads from all potential application directories
+const candidateUploadDirs = [
+  process.env.UPLOADS_DIR ? path.resolve(process.env.UPLOADS_DIR) : null,
+  path.join(os.homedir(), 'AppData', 'Roaming', 'smart-pos-desktop', 'uploads'),
+  path.join(__dirname, '../uploads'),
+  path.join('C:/Users/modif/AppData/Local/Programs/Smart POS/resources/backend/uploads'),
+].filter(Boolean);
+
+candidateUploadDirs.forEach((dir) => {
+  if (!fs.existsSync(dir)) {
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  }
+  if (fs.existsSync(dir)) {
+    app.use('/uploads', express.static(dir));
+  }
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -57,8 +76,6 @@ app.use('/api/categories', require('./routes/categories'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/reports', require('./routes/reports'));
-
-const os = require('os');
 
 function getLocalIP() {
   const nets = os.networkInterfaces();
@@ -131,6 +148,9 @@ initializeDatabase()
   .then(() => {
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`\n🚀 POS Backend & Realtime running at http://localhost:${PORT} and http://0.0.0.0:${PORT}`);
+      if (fs.existsSync(frontendDist)) {
+        console.log(`💻 Frontend Web App served at: http://localhost:${PORT}`);
+      }
       console.log(`📦 Health: http://localhost:${PORT}/api/health`);
       console.log(`🔌 WebSockets: ws://localhost:${PORT}/socket.io/\n`);
     });

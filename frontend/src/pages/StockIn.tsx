@@ -352,6 +352,10 @@ export default function StockIn() {
 
   // Clear all PO history and rollback stock
   const handleClearAllHistory = async () => {
+    if (history.length === 0) {
+      alert('ยังไม่มีประวัติเอกสารรับสินค้าเข้าในระบบ');
+      return;
+    }
     if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการเคลียร์ประวัติเอกสารรับเข้าทั้งหมด?\n\n⚠️ คำเตือน: ระบบจะทำการปรับคืนสต็อกสินค้าทั้งหมดที่เคยรับเข้ากลับคืน')) {
       return;
     }
@@ -860,20 +864,19 @@ export default function StockIn() {
           <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-bold text-slate-800">ประวัติเอกสารรับสินค้าเข้า (Purchase Orders)</h3>
             <div className="flex items-center gap-2">
-              {history.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAllHistory}
-                  className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
-                  title="ล้างประวัติการรับเข้าทั้งหมดและปรับคืนสต็อก"
-                >
-                  <Trash2 size={13} /> เคลียร์ประวัติทั้งหมด
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleClearAllHistory}
+                className="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                title="ล้างประวัติการรับเข้าทั้งหมดและปรับคืนสต็อก"
+              >
+                <Trash2 size={14} className="text-rose-500" />
+                <span>เคลียร์ประวัติรับเข้า</span>
+              </button>
               <button
                 type="button"
                 onClick={loadHistory}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-blue-50 transition-colors cursor-pointer"
               >
                 <RefreshCw size={13} /> รีเฟรช
               </button>

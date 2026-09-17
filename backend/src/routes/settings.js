@@ -1,12 +1,31 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const { run, get, all } = require('../db/database');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { emitEvent } = require('../realtime');
 
 const router = express.Router();
+
+function mirrorUploadedFile(uploadedFilePath, filename) {
+  const mirrors = [
+    path.join(os.homedir(), 'AppData', 'Roaming', 'smart-pos-desktop', 'uploads'),
+    path.join(__dirname, '../../uploads'),
+    path.join('C:/Users/modif/AppData/Local/Programs/Smart POS/resources/backend/uploads'),
+    path.join(__dirname, '../../../desktop-app/release/win-unpacked/resources/backend/uploads'),
+  ];
+  mirrors.forEach((dir) => {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const dst = path.join(dir, filename);
+      if (dst !== path.resolve(uploadedFilePath) && !fs.existsSync(dst)) {
+        fs.copyFileSync(uploadedFilePath, dst);
+      }
+    } catch (_) {}
+  });
+}
 
 // Multer storage for store logos
 const uploadsDir = process.env.UPLOADS_DIR ? path.resolve(process.env.UPLOADS_DIR) : path.join(__dirname, '../../uploads');
@@ -201,6 +220,7 @@ router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), 
     }
 
     const logoUrl = `/uploads/${req.file.filename}`;
+    mirrorUploadedFile(req.file.path, req.file.filename);
 
     // Load existing store_info
     let storeInfo = {
@@ -287,6 +307,124 @@ router.delete('/logo', authenticate, requireRole('admin'), async (req, res) => {
       message: 'รีเซ็ตโลโก้เป็นค่าเริ่มต้นเรียบร้อยแล้ว',
       store_info: storeInfo,
     });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * POST /api/settings/clear-data
+ * เคลียร์รายการข้อมูลตามประเภทที่เลือก
+ */
+router.post('/clear-data', authenticate, async (req, res) => {
+  try {
+    const { target, restore_stock = false, reset_stock = false } = req.body;
+
+    if (!target) {
+      return res.status(400).json({ message: 'กรุณาระบุประเภทข้อมูลที่ต้องการเคลียร์' });
+    }
+
+    if (target === 'sales') {
+      if (restore_stock) {
+        const saleItems = await all('SELECT product_id, SUM(qty) as total_qty FROM sale_items GROUP BY product_id');
+        for (const item of saleItems) {
+          const product = await get('SELECT stock_qty FROM products WHERE id = ?', [item.product_id]);
+          if (product) {
+            const restoredStock = product.stock_qty + Number(item.total_qty);
+            await run('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [restoredStock, item.product_id]);
+            await run(
+              `INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note, user_id)
+               VALUES (?, 'ADJUST', ?, ?, ?, 'clear_sales', 0, 'คืนสต็อกจากการล้างประวัติการขาย', ?)`,
+              [item.product_id, item.total_qty, product.stock_qty, restoredStock, req.user.id]
+            );
+          }
+        }
+      }
+      await run('DELETE FROM sale_items');
+      await run('DELETE FROM sales');
+
+      emitEvent('sales:cleared', { clear_all: true });
+      emitEvent('dashboard:refresh', { trigger: 'sales_cleared' });
+      emitEvent('inventory:updated', { action: 'sales_cleared' });
+
+      return res.json({ message: 'เคลียร์ประวัติยอดขายและใบเสร็จทั้งหมดสำเร็จ' });
+    }
+
+    if (target === 'inventory') {
+      await run('DELETE FROM stock_movements');
+      await run('DELETE FROM po_items');
+      await run('DELETE FROM purchase_orders');
+      await run('DELETE FROM requisition_items');
+      await run('DELETE FROM stock_requisitions');
+
+      emitEvent('inventory:updated', { action: 'inventory_history_cleared' });
+      emitEvent('dashboard:refresh', { trigger: 'inventory_history_cleared' });
+
+      return res.json({ message: 'เคลียร์ประวัติความเคลื่อนไหวสต็อก, รับเข้า, และเบิกจ่ายทั้งหมดสำเร็จ' });
+    }
+
+    if (target === 'products') {
+      await run('DELETE FROM stock_movements');
+      await run('DELETE FROM po_items');
+      await run('DELETE FROM requisition_items');
+      await run('DELETE FROM sale_items');
+      await run('DELETE FROM products');
+
+      emitEvent('inventory:updated', { action: 'products_cleared' });
+      emitEvent('dashboard:refresh', { trigger: 'products_cleared' });
+
+      return res.json({ message: 'เคลียร์รายการสินค้าทั้งหมดออกจากระบบสำเร็จ' });
+    }
+
+    if (target === 'categories') {
+      await run('UPDATE products SET category_id = NULL');
+      await run('DELETE FROM categories');
+
+      emitEvent('category:updated', { action: 'categories_cleared' });
+      emitEvent('dashboard:refresh', { trigger: 'categories_cleared' });
+
+      return res.json({ message: 'เคลียร์หมวดหมู่สินค้าทั้งหมดสำเร็จ' });
+    }
+
+    if (target === 'test_data') {
+      await run('DELETE FROM sale_items');
+      await run('DELETE FROM sales');
+      await run('DELETE FROM stock_movements');
+      await run('DELETE FROM po_items');
+      await run('DELETE FROM purchase_orders');
+      await run('DELETE FROM requisition_items');
+      await run('DELETE FROM stock_requisitions');
+
+      if (reset_stock) {
+        await run('UPDATE products SET stock_qty = 0, updated_at = CURRENT_TIMESTAMP');
+      }
+
+      emitEvent('sales:cleared', { clear_all: true });
+      emitEvent('inventory:updated', { action: 'test_data_cleared' });
+      emitEvent('dashboard:refresh', { trigger: 'test_data_cleared' });
+
+      return res.json({ message: 'เคลียร์ข้อมูลยอดขายและประวัติสต็อกทดสอบทั้งหมดเรียบร้อยแล้ว' });
+    }
+
+    if (target === 'all') {
+      await run('DELETE FROM sale_items');
+      await run('DELETE FROM sales');
+      await run('DELETE FROM stock_movements');
+      await run('DELETE FROM po_items');
+      await run('DELETE FROM purchase_orders');
+      await run('DELETE FROM requisition_items');
+      await run('DELETE FROM stock_requisitions');
+      await run('DELETE FROM products');
+      await run('DELETE FROM categories');
+
+      emitEvent('sales:cleared', { clear_all: true });
+      emitEvent('inventory:updated', { action: 'all_cleared' });
+      emitEvent('dashboard:refresh', { trigger: 'all_cleared' });
+
+      return res.json({ message: 'ล้างข้อมูลระบบทั้งหมดเรียบร้อยแล้ว' });
+    }
+
+    return res.status(400).json({ message: 'ไม่พบประเภทข้อมูลที่ระบุ' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -40,6 +40,26 @@ const upload = multer({
   }
 });
 
+const os = require('os');
+
+function mirrorUploadedFile(uploadedFilePath, filename) {
+  const mirrors = [
+    path.join(os.homedir(), 'AppData', 'Roaming', 'smart-pos-desktop', 'uploads'),
+    path.join(__dirname, '../../uploads'),
+    path.join('C:/Users/modif/AppData/Local/Programs/Smart POS/resources/backend/uploads'),
+    path.join(__dirname, '../../../desktop-app/release/win-unpacked/resources/backend/uploads'),
+  ];
+  mirrors.forEach((dir) => {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const dst = path.join(dir, filename);
+      if (dst !== path.resolve(uploadedFilePath) && !fs.existsSync(dst)) {
+        fs.copyFileSync(uploadedFilePath, dst);
+      }
+    } catch (_) {}
+  });
+}
+
 // POST /api/products/upload - Upload product image file
 router.post('/upload', authenticate, (req, res) => {
   upload.single('image')(req, res, (err) => {
@@ -50,6 +70,7 @@ router.post('/upload', authenticate, (req, res) => {
       return res.status(400).json({ message: 'กรุณาเลือกไฟล์รูปภาพ' });
     }
     const fileUrl = `/uploads/${req.file.filename}`;
+    mirrorUploadedFile(req.file.path, req.file.filename);
     res.json({
       url: fileUrl,
       filename: req.file.filename,

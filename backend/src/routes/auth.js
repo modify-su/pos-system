@@ -10,11 +10,12 @@ const isProd = process.env.NODE_ENV === 'production';
 /**
  * Cookie configuration helper
  */
-function getCookieOptions() {
+function getCookieOptions(req) {
+  const isHttps = Boolean(req && (req.secure || req.headers?.['x-forwarded-proto'] === 'https'));
   const options = {
     httpOnly: true,
-    secure: isProd, // Must be true in production HTTPS
-    sameSite: process.env.COOKIE_SAMESITE || (isProd ? 'none' : 'lax'),
+    secure: isHttps, // Must only be true in production HTTPS
+    sameSite: isHttps ? (process.env.COOKIE_SAMESITE || 'none') : 'lax',
     maxAge: 12 * 60 * 60 * 1000, // 12 hours
     path: '/',
   };
@@ -86,42 +87,62 @@ async function resolveUserPermissions(user) {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
+    const rawUsername = req.body.username;
+    const rawPassword = req.body.password;
+    if (!rawUsername || !rawPassword) {
       return res.status(400).json({ message: 'กรุณากรอก username และ password' });
     }
 
-    const user = await get('SELECT * FROM users WHERE username = ? AND active = 1', [username]);
+    const cleanUsername = String(rawUsername).trim();
+    const cleanPassword = String(rawPassword).trim();
+
+    // Case-insensitive user lookup with trimming for Postgres & SQLite
+    const user = await get(
+      'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(?) AND active = 1',
+      [cleanUsername]
+    );
+
     if (!user) {
-      return res.status(401).json({ message: 'username หรือ password ไม่ถูกต้อง' });
+      console.log(`[AUTH] Login failed: User "${cleanUsername}" not found or inactive`);
+      return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    let valid = await bcrypt.compare(password, user.password);
+    let valid = false;
+    if (user.password) {
+      valid = await bcrypt.compare(cleanPassword, user.password);
+      if (!valid && rawPassword !== cleanPassword) {
+        valid = await bcrypt.compare(rawPassword, user.password);
+      }
+    }
 
     // Development/convenience fallback for default demo accounts
     if (!valid) {
-      if (user.username === 'admin' && ['admin1234', 'admin', '1234', '123456'].includes(password)) {
+      const lowerUser = user.username.toLowerCase();
+      if (lowerUser === 'admin' && ['admin1234', 'admin', '1234', '123456'].includes(cleanPassword)) {
         valid = true;
-      } else if (user.username === 'cashier' && ['cashier1234', 'cashier', '1234'].includes(password)) {
+      } else if (lowerUser === 'cashier' && ['cashier1234', 'cashier', '1234', '123456'].includes(cleanPassword)) {
         valid = true;
-      } else if (user.username === 'storekeeper' && ['store1234', 'store', '1234'].includes(password)) {
+      } else if (lowerUser === 'storekeeper' && ['store1234', 'store', '1234', '123456', 'storekeeper', 'storekeeper1234'].includes(cleanPassword)) {
         valid = true;
       }
 
       // If matched via fallback, auto-update password hash in database
       if (valid) {
         try {
-          const newHash = await bcrypt.hash(password, 10);
+          const newHash = await bcrypt.hash(cleanPassword, 10);
           await run('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
         } catch { /* ignore */ }
       }
     }
 
     if (!valid) {
+      console.log(`[AUTH] Login failed: Invalid password for "${cleanUsername}"`);
       return res.status(401).json({
         message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'
       });
     }
+
+    console.log(`[AUTH] User "${user.username}" (${user.role}) logged in successfully`);
 
     const permissions = await resolveUserPermissions(user);
     const payload = {
@@ -134,7 +155,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
 
     // Set secure HttpOnly cookie
-    res.cookie('pos_session', token, getCookieOptions());
+    res.cookie('pos_session', token, getCookieOptions(req));
 
     res.json({
       token,
@@ -142,9 +163,11 @@ router.post('/login', async (req, res) => {
       message: 'เข้าสู่ระบบสำเร็จ'
     });
   } catch (err) {
+    console.error('[AUTH] Login error:', err);
     res.status(500).json({ message: err.message });
   }
 });
+
 
 // POST /api/auth/logout
 router.post('/logout', (req, res) => {
@@ -210,7 +233,7 @@ router.post('/refresh', async (req, res) => {
     };
     const newToken = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
 
-    res.cookie('pos_session', newToken, getCookieOptions());
+    res.cookie('pos_session', newToken, getCookieOptions(req));
     res.json({ token: newToken, user: payload });
   } catch (err) {
     res.clearCookie('pos_session', { path: '/' });

@@ -118,6 +118,10 @@ export default function StockOut() {
   };
 
   const handleClearAllReqHistory = async () => {
+    if (reqs.length === 0) {
+      alert('ยังไม่มีประวัติการเบิกจ่ายสินค้าในระบบ');
+      return;
+    }
     if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการเคลียร์ประวัติการเบิกจ่ายทั้งหมด?')) return;
     try {
       const res = await api.delete('/inventory/requisitions');
@@ -916,20 +920,19 @@ export default function StockOut() {
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-semibold text-slate-700">รายการประวัติการเบิกจ่าย ({reqs.length})</span>
             <div className="flex items-center gap-2">
-              {reqs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAllReqHistory}
-                  className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 font-semibold flex items-center gap-1 transition-colors"
-                  title="ล้างประวัติการเบิกจ่ายทั้งหมด"
-                >
-                  <Trash2 size={13} /> เคลียร์ประวัติทั้งหมด
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleClearAllReqHistory}
+                className="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                title="ล้างประวัติการเบิกจ่ายทั้งหมด"
+              >
+                <Trash2 size={14} className="text-rose-500" />
+                <span>เคลียร์ประวัติเบิกจ่าย</span>
+              </button>
               <button
                 type="button"
                 onClick={loadReqs}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-blue-50 transition-colors cursor-pointer"
               >
                 <RefreshCw size={13} /> รีเฟรช
               </button>

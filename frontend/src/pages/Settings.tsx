@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore, type LogoConfig, type StoreInfo, DEFAULT_STORE_INFO } from '../stores/settingsStore';
@@ -9,7 +10,7 @@ import {
   LayoutDashboard, ShoppingCart, Warehouse, ArrowDownCircle,
   ArrowUpCircle, Package, Tags, BarChart3, Settings as SettingsIcon,
   Lock, Eye, EyeOff, UserCheck, UserX, Palette, Upload, Image as ImageIcon,
-  Sparkles, Check
+  Sparkles, Check, ShieldAlert, AlertTriangle
 } from 'lucide-react';
 
 interface UserData {
@@ -285,13 +286,106 @@ const HIGH_IMPACT_TONE_PRESETS: TonePreset[] = [
   },
 ];
 
+type ClearTarget = 'sales' | 'inventory' | 'products' | 'categories' | 'test_data' | 'all';
+
+interface ClearActionConfig {
+  target: ClearTarget;
+  title: string;
+  badge: string;
+  icon: any;
+  desc: string;
+  warning: string;
+  buttonText: string;
+  color: 'amber' | 'rose' | 'red' | 'purple' | 'blue';
+  showRestoreStock?: boolean;
+  showResetStock?: boolean;
+}
+
+const CLEAR_ACTIONS_SETTINGS: ClearActionConfig[] = [
+  {
+    target: 'sales',
+    title: 'เคลียร์ประวัติยอดขาย (บิลขาย & ใบเสร็จ)',
+    badge: 'ประวัติการขาย',
+    icon: ShoppingCart,
+    desc: 'ลบรายการบิลขายและใบเสร็จทั้งหมด ยอดสรุปและรายงานการขายจะถูกรีเซ็ต',
+    warning: 'ประวัติบิลขายจะถูกลบถาวร ไม่สามารถกู้คืนได้',
+    buttonText: 'เคลียร์ประวัติการขาย',
+    color: 'amber',
+    showRestoreStock: true,
+  },
+  {
+    target: 'inventory',
+    title: 'เคลียร์ประวัติคลังสินค้า (รับเข้า / เบิกจ่าย / ความเคลื่อนไหว)',
+    badge: 'คลังสินค้า',
+    icon: Warehouse,
+    desc: 'ลบประวัติความเคลื่อนไหวสต็อก (Stock Movements), ประวัติรับเข้า (PO), และประวัติใบเบิกจ่ายสินค้า',
+    warning: 'ประวัติความเคลื่อนไหวทั้งหมดจะถูกล้าง แต่จำนวนสินค้าปัจจุบันยังคงอยู่',
+    buttonText: 'เคลียร์ประวัติคลังสินค้า',
+    color: 'rose',
+  },
+  {
+    target: 'products',
+    title: 'เคลียร์รายการสินค้าทั้งหมด',
+    badge: 'ข้อมูลสินค้า',
+    icon: Package,
+    desc: 'ลบสินค้าทุกรายการออกจากฐานข้อมูล เพื่อเริ่มต้นลงรายการสินค้าใหม่ตั้งแต่ต้น',
+    warning: '⚠️ สินค้าทุกรายการ รวมถึงบาร์โค้ดและรูปภาพจะถูกลบออกจากระบบ',
+    buttonText: 'เคลียร์สินค้าทั้งหมด',
+    color: 'red',
+  },
+  {
+    target: 'categories',
+    title: 'เคลียร์หมวดหมู่สินค้าทั้งหมด',
+    badge: 'หมวดหมู่',
+    icon: Tags,
+    desc: 'ลบหมวดหมู่สินค้าทั้งหมดออกจากระบบ (สินค้าที่ผูกไว้จะกลายเป็นไม่มีหมวดหมู่)',
+    warning: 'หมวดหมู่จะถูกล้างทั้งหมด',
+    buttonText: 'เคลียร์หมวดหมู่ทั้งหมด',
+    color: 'purple',
+  },
+  {
+    target: 'test_data',
+    title: 'เคลียร์ข้อมูลทดสอบระบบ (ยอดขาย + ประวัติสต็อก)',
+    badge: 'รีเซ็ตทดสอบ',
+    icon: Sparkles,
+    desc: 'ล้างประวัติการขาย ใบเสร็จ และประวัติสต็อกทดสอบทั้งหมด เพื่อเตรียมพร้อมเปิดร้านจริง',
+    warning: 'ข้อมูลการขายและการเคลื่อนไหวทั้งหมดจะถูกลบ',
+    buttonText: 'เคลียร์ข้อมูลทดสอบ',
+    color: 'blue',
+    showResetStock: true,
+  },
+  {
+    target: 'all',
+    title: 'ล้างข้อมูลระบบทั้งหมด (Full System Reset)',
+    badge: 'ล้างระบบทั้งหมด',
+    icon: ShieldAlert,
+    desc: 'ลบข้อมูลสินค้า หมวดหมู่ ยอดขาย และประวัติสต็อกทั้งหมด คืนค่าระบบกลับสู่สถานะว่างเปล่า',
+    warning: '⚠️ ข้อมูลทุกอย่างในระบบจะถูกลบอย่างสมบูรณ์แบบ กรุณาสำรองข้อมูลก่อนหากจำเป็น',
+    buttonText: 'ล้างข้อมูลระบบทั้งหมด',
+    color: 'red',
+  },
+];
+
 export default function Settings() {
   const { user: currentUser } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'logo' | 'store'>('users');
+  const [searchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'logo' | 'store' | 'cleardata'>(
+    (urlTab === 'cleardata' || urlTab === 'users' || urlTab === 'roles' || urlTab === 'logo' || urlTab === 'store')
+      ? urlTab
+      : 'users'
+  );
   const [loading, setLoading] = useState(true);
   const [saveLoading, setSaveLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Clear Data State
+  const [selectedClearAction, setSelectedClearAction] = useState<ClearActionConfig | null>(null);
+  const [clearRestoreStock, setClearRestoreStock] = useState(false);
+  const [clearResetStock, setClearResetStock] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState('');
+  const [clearLoading, setClearLoading] = useState(false);
 
   // Users State
   const [users, setUsers] = useState<UserData[]>([]);
@@ -660,6 +754,46 @@ export default function Settings() {
     }
   };
 
+  // Clear Data Handlers
+  const handleSelectClearAction = (action: ClearActionConfig) => {
+    setSelectedClearAction(action);
+    setClearRestoreStock(false);
+    setClearResetStock(false);
+    setClearConfirmText('');
+  };
+
+  const handleExecuteClear = async () => {
+    if (!selectedClearAction) return;
+
+    if (selectedClearAction.target === 'products' || selectedClearAction.target === 'all') {
+      if (clearConfirmText.trim().toUpperCase() !== 'CONFIRM' && clearConfirmText.trim() !== 'ยืนยัน') {
+        notifyError('กรุณาพิมพ์คำว่า CONFIRM หรือ ยืนยัน เพื่อยืนยันการลบ');
+        return;
+      }
+    }
+
+    setClearLoading(true);
+    try {
+      const res = await api.post('/settings/clear-data', {
+        target: selectedClearAction.target,
+        restore_stock: clearRestoreStock,
+        reset_stock: clearResetStock,
+      });
+
+      const msg = res.data?.message || 'ดำเนินการเคลียร์ข้อมูลเรียบร้อยแล้ว';
+      notifySuccess(msg);
+      setSelectedClearAction(null);
+      setClearConfirmText('');
+      setClearRestoreStock(false);
+      setClearResetStock(false);
+      await fetchData();
+    } catch (err: any) {
+      notifyError(err.response?.data?.message || err.message || 'เกิดข้อผิดพลาดในการเคลียร์ข้อมูล');
+    } finally {
+      setClearLoading(false);
+    }
+  };
+
   const filteredUsers = users.filter(u =>
     u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
     u.username.toLowerCase().includes(searchUser.toLowerCase()) ||
@@ -766,6 +900,18 @@ export default function Settings() {
         >
           <Store size={18} />
           <span>ข้อมูลร้านค้า & ทั่วไป</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('cleardata')}
+          className={`pb-3 px-4 text-sm font-bold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'cleardata'
+              ? 'border-rose-600 text-rose-600'
+              : 'border-transparent text-slate-500 hover:text-rose-600 hover:border-slate-300'
+          }`}
+        >
+          <Trash2 size={18} className={activeTab === 'cleardata' ? 'text-rose-600' : 'text-slate-400'} />
+          <span>เคลียร์รายการ / ล้างข้อมูลระบบ</span>
         </button>
       </div>
 
@@ -1900,6 +2046,192 @@ export default function Settings() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* TAB 5: CLEAR DATA & SYSTEM RESET */}
+      {activeTab === 'cleardata' && (
+        <div className="max-w-4xl space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center border border-rose-200">
+                  <Trash2 size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">เคลียร์รายการ / ล้างข้อมูลระบบ</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    เลือกรายการข้อมูลที่ต้องการล้างออกจากฐานข้อมูลตามหมวดหมู่ได้อย่างปลอดภัยและเป็นระบบ
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+              <AlertTriangle size={17} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <span className="leading-relaxed">
+                <strong>ข้อควรระวัง:</strong> การเคลียร์รายการจะลบข้อมูลออกจากฐานข้อมูลโดยตรง กรุณาตรวจสอบให้แน่ใจก่อนทำการกดยืนยันในแต่ละหัวข้อ โดยข้อมูลที่ถูกลบจะไม่สามารถกู้คืนได้
+              </span>
+            </div>
+
+            {!selectedClearAction ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {CLEAR_ACTIONS_SETTINGS.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <div
+                      key={action.target}
+                      onClick={() => handleSelectClearAction(action)}
+                      className="p-5 rounded-2xl border border-slate-200 hover:border-rose-400 hover:shadow-md bg-white transition-all cursor-pointer group flex items-start gap-4"
+                    >
+                      <div
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105 ${
+                          action.color === 'amber'
+                            ? 'bg-amber-100 text-amber-700'
+                            : action.color === 'rose'
+                            ? 'bg-rose-100 text-rose-700'
+                            : action.color === 'red'
+                            ? 'bg-red-100 text-red-700'
+                            : action.color === 'purple'
+                            ? 'bg-purple-100 text-purple-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}
+                      >
+                        <Icon size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm text-slate-800 group-hover:text-rose-600 transition-colors">
+                            {action.title}
+                          </h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold bg-slate-100 text-slate-600">
+                            {action.badge}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          {action.desc}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="space-y-4 p-5 rounded-2xl border border-rose-200 bg-rose-50/20 animate-fadeIn">
+                <button
+                  type="button"
+                  onClick={() => setSelectedClearAction(null)}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                >
+                  ← กลับไปเลือกหัวข้ออื่น
+                </button>
+
+                <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                  <div className="flex items-center gap-2.5 font-bold text-slate-800 text-base">
+                    <selectedClearAction.icon size={20} className="text-rose-600" />
+                    <span>{selectedClearAction.title}</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    {selectedClearAction.desc}
+                  </p>
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs flex items-start gap-2">
+                    <AlertTriangle size={15} className="text-rose-600 flex-shrink-0 mt-0.5" />
+                    <span>{selectedClearAction.warning}</span>
+                  </div>
+                </div>
+
+                {/* Option: Restore Stock */}
+                {selectedClearAction.showRestoreStock && (
+                  <label className="flex items-start gap-2.5 p-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={clearRestoreStock}
+                      onChange={(e) => setClearRestoreStock(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        คืนจำนวนสต็อกสินค้าที่เคยขายกลับเข้าคลัง
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        หากเลือกข้อนี้ สินค้าทุกชิ้นที่เคยขายไปจะถูกบวกยอดสต็อกกลับคืนเหมือนก่อนขาย
+                      </span>
+                    </div>
+                  </label>
+                )}
+
+                {/* Option: Reset Stock */}
+                {selectedClearAction.showResetStock && (
+                  <label className="flex items-start gap-2.5 p-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={clearResetStock}
+                      onChange={(e) => setClearResetStock(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        รีเซ็ตจำนวนสต็อกสินค้าคงเหลือทุกชิ้นเป็น 0
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        ปรับยอดคงเหลือสินค้าทุกรายการเป็น 0 ชิ้นเพื่อเริ่มนับสต็อกจริงใหม่
+                      </span>
+                    </div>
+                  </label>
+                )}
+
+                {/* Confirm Text for Destructive Actions */}
+                {(selectedClearAction.target === 'products' || selectedClearAction.target === 'all') && (
+                  <div className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                    <p className="text-xs font-bold text-red-900">
+                      พิมพ์คำว่า "CONFIRM" หรือ "ยืนยัน" ในช่องด้านล่างเพื่อปลดล็อกปุ่ม:
+                    </p>
+                    <input
+                      type="text"
+                      value={clearConfirmText}
+                      onChange={(e) => setClearConfirmText(e.target.value)}
+                      placeholder="พิมพ์ CONFIRM เพื่อยืนยัน"
+                      className="w-full px-3 py-2 bg-white border border-red-300 rounded-lg text-sm text-red-900 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClearAction(null)}
+                    disabled={clearLoading}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExecuteClear}
+                    disabled={
+                      clearLoading ||
+                      ((selectedClearAction.target === 'products' || selectedClearAction.target === 'all') &&
+                        clearConfirmText.trim().toUpperCase() !== 'CONFIRM' &&
+                        clearConfirmText.trim() !== 'ยืนยัน')
+                    }
+                    className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  >
+                    {clearLoading ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>กำลังเคลียร์ข้อมูล...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 size={14} />
+                        <span>{selectedClearAction.buttonText}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* USER CREATE / EDIT MODAL */}

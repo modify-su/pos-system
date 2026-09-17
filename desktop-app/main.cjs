@@ -56,13 +56,14 @@ async function ensureBackendRunning() {
   const dbPath = path.join(userDataPath, 'pos.db');
   const uploadsPath = path.join(userDataPath, 'uploads');
 
-  if (app.isPackaged) {
-    backendPath = path.join(process.resourcesPath, 'backend', 'src', 'index.js');
-    frontendDistPath = path.join(process.resourcesPath, 'frontend', 'dist');
-  } else {
-    backendPath = path.resolve(__dirname, '../backend/src/index.js');
-    frontendDistPath = path.resolve(__dirname, '../frontend/dist');
-  }
+  const backendDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'backend')
+    : path.resolve(__dirname, '../backend');
+
+  backendPath = path.join(backendDir, 'src', 'index.js');
+  frontendDistPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'frontend', 'dist')
+    : path.resolve(__dirname, '../frontend/dist');
 
   if (!fs.existsSync(userDataPath)) {
     fs.mkdirSync(userDataPath, { recursive: true });
@@ -71,11 +72,39 @@ async function ensureBackendRunning() {
     fs.mkdirSync(uploadsPath, { recursive: true });
   }
 
-  // If fresh install and no db exists, copy initial pos.db template if available
-  const templateDb = app.isPackaged
-    ? path.join(process.resourcesPath, 'backend', 'pos.db')
-    : path.resolve(__dirname, '../backend/pos.db');
-  if (!fs.existsSync(dbPath) && fs.existsSync(templateDb)) {
+  // Load backend/.env if present so DATABASE_URL / secrets are passed through
+  const envFile = path.join(backendDir, '.env');
+  const loadedEnv = {};
+  if (fs.existsSync(envFile)) {
+    try {
+      const lines = fs.readFileSync(envFile, 'utf8').split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+          const idx = trimmed.indexOf('=');
+          const k = trimmed.slice(0, idx).trim();
+          const v = trimmed.slice(idx + 1).trim();
+          loadedEnv[k] = v;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not read backend .env:', e.message);
+    }
+  }
+
+  // If fresh install or existing db is empty, copy initial pos.db template if available
+  const templateDb = path.join(backendDir, 'pos.db');
+  let shouldCopyTemplate = !fs.existsSync(dbPath);
+  if (!shouldCopyTemplate && fs.existsSync(templateDb)) {
+    try {
+      const dbStat = fs.statSync(dbPath);
+      const templateStat = fs.statSync(templateDb);
+      if (dbStat.size < templateStat.size / 2) {
+        shouldCopyTemplate = true;
+      }
+    } catch (_) {}
+  }
+  if (shouldCopyTemplate && fs.existsSync(templateDb)) {
     try {
       fs.copyFileSync(templateDb, dbPath);
       console.log('📦 Initialized default database at:', dbPath);
@@ -85,8 +114,10 @@ async function ensureBackendRunning() {
   }
 
   backendProcess = fork(backendPath, [], {
+    cwd: backendDir,
     env: {
       ...process.env,
+      ...loadedEnv,
       PORT: String(BACKEND_PORT),
       NODE_ENV: 'production',
       DB_PATH: dbPath,

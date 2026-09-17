@@ -2,43 +2,54 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-const isPostgres = Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+let isPostgres = Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 
 let pool = null;
 let db = null;
 
-// Initialize PostgreSQL pool if configured
-if (isPostgres) {
-  const { Pool, types } = require('pg');
+function initPostgresPool() {
+  if (!pool && isPostgres) {
+    const { Pool, types } = require('pg');
 
-  // Parse NUMERIC / DECIMAL (type ID 1700) to float instead of string
-  types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val)));
-  // Parse BIGINT (type ID 20) to integer
-  types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10)));
+    // Parse NUMERIC / DECIMAL (type ID 1700) to float instead of string
+    types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val)));
+    // Parse BIGINT (type ID 20) to integer
+    types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10)));
 
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
 
-  pool = new Pool({
-    connectionString,
-    ssl: process.env.DATABASE_SSL === 'false' || isLocal
-      ? false
-      : { rejectUnauthorized: false },
-    max: parseInt(process.env.DB_POOL_MAX || '10', 10),
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-  });
+    pool = new Pool({
+      connectionString,
+      ssl: process.env.DATABASE_SSL === 'false' || isLocal
+        ? false
+        : { rejectUnauthorized: false },
+      max: parseInt(process.env.DB_POOL_MAX || '10', 10),
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 7000,
+    });
 
-  pool.on('error', (err) => {
-    console.error('⚠️ Unexpected error on idle PostgreSQL client:', err.message);
-  });
+    pool.on('error', (err) => {
+      console.error('⚠️ Unexpected error on idle PostgreSQL client:', err.message);
+    });
 
-  console.log('🐘 PostgreSQL configured. Host target:', connectionString.split('@')[1] || 'configured connection');
+    console.log('🐘 PostgreSQL configured. Host target:', connectionString.split('@')[1] || 'configured connection');
+  }
 }
 
-const DB_PATH = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(__dirname, '../../pos.db');
+if (isPostgres) {
+  initPostgresPool();
+}
+
+const defaultDbPath = path.join(__dirname, '../../pos.db');
+let DB_PATH = defaultDbPath;
+if (process.env.DB_PATH) {
+  DB_PATH = path.isAbsolute(process.env.DB_PATH)
+    ? process.env.DB_PATH
+    : path.resolve(path.join(__dirname, '../..'), process.env.DB_PATH);
+}
 const dbDir = path.dirname(DB_PATH);
-if (!isPostgres && !fs.existsSync(dbDir)) {
+if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
@@ -546,15 +557,27 @@ async function initializeSqliteSchema() {
 
 async function initializeDatabase() {
   if (isPostgres) {
-    await initializePostgresSchema();
+    try {
+      initPostgresPool();
+      await initializePostgresSchema();
+    } catch (err) {
+      console.warn(`⚠️ ไม่สามารถเชื่อมต่อ Cloud PostgreSQL ได้ (${err.message})`);
+      console.warn('🔄 กำลังสลับใช้งาน SQLite ในเครื่อง (โหมดออฟไลน์) แทน เพื่อให้ระบบขายหน้าร้านทำงานได้ตลอดเวลา');
+      isPostgres = false;
+      if (pool) {
+        try { await pool.end(); } catch (_) {}
+        pool = null;
+      }
+      await initializeSqliteSchema();
+    }
   } else {
     await initializeSqliteSchema();
   }
 }
 
 module.exports = {
-  isPostgres,
-  pool,
+  get isPostgres() { return isPostgres; },
+  get pool() { return pool; },
   getDb,
   run,
   get,
