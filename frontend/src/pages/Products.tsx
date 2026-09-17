@@ -3,8 +3,12 @@ import api from '../api/client';
 import { useRealtimeEvent } from '../utils/socket';
 import {
   Search, Plus, Edit2, Trash2, X, Save, Package,
-  UploadCloud, Link as LinkIcon, Image as ImageIcon, Loader2
+  UploadCloud, Link as LinkIcon, Image as ImageIcon, Loader2,
+  QrCode, Sparkles
 } from 'lucide-react';
+import BarcodeLabelModal, { type LabelItem } from '../components/BarcodeLabelModal';
+import BarcodeView from '../components/BarcodeView';
+import QRCodeView from '../components/QRCodeView';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -18,6 +22,12 @@ export default function Products() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [labelModalData, setLabelModalData] = useState<{
+    title: string;
+    docNo?: string;
+    items: LabelItem[];
+  } | null>(null);
 
   // Image upload state
   const [imageMode, setImageMode] = useState<'upload' | 'url'>('upload');
@@ -104,11 +114,71 @@ export default function Products() {
     load();
   };
 
+  const handleOpenProductBarcode = (p: any) => {
+    setLabelModalData({
+      title: `สร้างและพิมพ์บาร์โค้ด & QR Code: ${p.name}`,
+      docNo: p.barcode,
+      items: [
+        {
+          product_id: p.id,
+          name: p.name,
+          barcode: p.barcode,
+          qty: Math.max(1, p.stock_qty || 1),
+          unit: p.unit || 'ชิ้น',
+          sell_price: p.sell_price,
+          cost_price: p.cost_price,
+        },
+      ],
+    });
+    setShowLabelModal(true);
+  };
+
+  const handleOpenBatchBarcode = () => {
+    if (products.length === 0) {
+      alert('ไม่พบรายการสินค้าสำหรับสร้าง Barcode / QR Code');
+      return;
+    }
+    setLabelModalData({
+      title: `พิมพ์สติกเกอร์บาร์โค้ด & QR Code สินค้า (${products.length} รายการ)`,
+      docNo: `PRD-${Date.now().toString().slice(-6)}`,
+      items: products.map((p) => ({
+        product_id: p.id,
+        name: p.name,
+        barcode: p.barcode,
+        qty: Math.max(1, p.stock_qty || 1),
+        unit: p.unit || 'ชิ้น',
+        sell_price: p.sell_price,
+        cost_price: p.cost_price,
+      })),
+    });
+    setShowLabelModal(true);
+  };
+
+  const handleGenerateNewBarcode = () => {
+    const newCode = `ITM${Date.now()}${Math.floor(Math.random() * 9000 + 1000)}`;
+    setForm((prev: any) => ({ ...prev, barcode: newCode }));
+  };
+
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-slate-800">จัดการสินค้า</h1>
-        <button onClick={openNew} className="btn-primary"><Plus size={18} /> เพิ่มสินค้า</button>
+        <div className="flex items-center gap-2">
+          {products.length > 0 && (
+            <button
+              type="button"
+              onClick={handleOpenBatchBarcode}
+              className="btn-outline flex items-center gap-1.5 text-slate-700 hover:text-blue-600 hover:border-blue-300 transition-all cursor-pointer"
+              title="พิมพ์สติกเกอร์บาร์โค้ดและ QR Code ของสินค้าทั้งหมด"
+            >
+              <QrCode size={16} className="text-blue-600" />
+              <span>สร้าง Barcode / QR Code</span>
+            </button>
+          )}
+          <button onClick={openNew} className="btn-primary">
+            <Plus size={18} /> เพิ่มสินค้า
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-3 flex-wrap">
@@ -173,9 +243,17 @@ export default function Products() {
                 </td>
                 <td className="text-center text-slate-500">{p.min_stock}</td>
                 <td>
-                  <div className="flex gap-1">
-                    <button onClick={() => openEdit(p)} className="btn-outline btn-sm"><Edit2 size={13} /></button>
-                    <button onClick={() => handleDelete(p.id, p.name)} className="btn-danger btn-sm"><Trash2 size={13} /></button>
+                  <div className="flex gap-1 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenProductBarcode(p)}
+                      className="btn-outline btn-sm text-blue-600 hover:bg-blue-50"
+                      title="สร้างและพิมพ์ Barcode / QR Code"
+                    >
+                      <QrCode size={13} />
+                    </button>
+                    <button onClick={() => openEdit(p)} className="btn-outline btn-sm" title="แก้ไขสินค้า"><Edit2 size={13} /></button>
+                    <button onClick={() => handleDelete(p.id, p.name)} className="btn-danger btn-sm" title="ลบสินค้า"><Trash2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -293,17 +371,64 @@ export default function Products() {
                 )}
               </div>
 
-              {[
-                { key: 'barcode', label: 'บาร์โค้ด', placeholder: 'ระบบจะสร้างให้อัตโนมัติ', span: 2 },
-                { key: 'name', label: 'ชื่อสินค้า *', placeholder: 'ชื่อสินค้า', span: 2 },
-                { key: 'description', label: 'รายละเอียด', placeholder: 'รายละเอียด', span: 2 },
-              ].map(f => (
-                <div key={f.key} className={f.span === 2 ? 'col-span-2' : ''}>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">{f.label}</label>
-                  <input className="input" value={form[f.key] || ''} placeholder={f.placeholder}
-                    onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+              {/* Barcode field with generate button and preview */}
+              <div className="col-span-2 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <QrCode size={16} className="text-blue-600" />
+                    รหัสบาร์โค้ด (Barcode / QR Code)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateNewBarcode}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                    title="สุ่มสร้างรหัสบาร์โค้ดใหม่"
+                  >
+                    <Sparkles size={13} />
+                    <span>สร้างรหัสใหม่</span>
+                  </button>
                 </div>
-              ))}
+                <input
+                  className="input bg-white font-mono text-sm"
+                  value={form.barcode || ''}
+                  placeholder="เว้นว่างเพื่อให้ระบบสร้างให้อัตโนมัติ (เช่น ITM1789...)"
+                  onChange={e => setForm({ ...form, barcode: e.target.value })}
+                />
+                {form.barcode && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 flex items-center justify-around gap-4 bg-white p-2.5 rounded-lg">
+                    <div className="text-center">
+                      <p className="text-[10px] text-slate-400 font-bold mb-1">ตัวอย่าง Barcode</p>
+                      <BarcodeView value={form.barcode} height={32} fontSize={10} />
+                    </div>
+                    <div className="w-px h-12 bg-slate-200" />
+                    <div className="text-center flex flex-col items-center">
+                      <p className="text-[10px] text-slate-400 font-bold mb-1">ตัวอย่าง QR Code</p>
+                      <QRCodeView value={form.barcode} size={48} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1">ชื่อสินค้า *</label>
+                <input
+                  className="input"
+                  value={form.name || ''}
+                  placeholder="ชื่อสินค้า"
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1">รายละเอียด</label>
+                <input
+                  className="input"
+                  value={form.description || ''}
+                  placeholder="รายละเอียดสินค้า"
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">หมวดหมู่</label>
                 <select className="input" value={form.category_id || ''} onChange={e => setForm({ ...form, category_id: e.target.value })}>
@@ -346,6 +471,20 @@ export default function Products() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Barcode & QR Label Printing Modal */}
+      {showLabelModal && labelModalData && (
+        <BarcodeLabelModal
+          title={labelModalData.title}
+          docNo={labelModalData.docNo}
+          docType="PRODUCT"
+          items={labelModalData.items}
+          onClose={() => {
+            setShowLabelModal(false);
+            setLabelModalData(null);
+          }}
+        />
       )}
     </div>
   );

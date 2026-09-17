@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useRealtimeEvent } from '../utils/socket';
-import { AlertTriangle, Search, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Search, RefreshCw, Trash2, QrCode } from 'lucide-react';
+import BarcodeLabelModal, { type LabelItem } from '../components/BarcodeLabelModal';
 
 const fmt = (n: number) => n?.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -18,6 +19,12 @@ export default function Inventory() {
   const [newQty, setNewQty] = useState('');
   const [adjustNote, setAdjustNote] = useState('');
   const [tab, setTab] = useState<'stock' | 'movements'>('stock');
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [labelModalData, setLabelModalData] = useState<{
+    title: string;
+    docNo?: string;
+    items: LabelItem[];
+  } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +54,46 @@ export default function Inventory() {
     } catch (err: any) {
       alert(err.response?.data?.message || 'เกิดข้อผิดพลาดในการล้างประวัติ');
     }
+  };
+
+  const handleOpenProductBarcode = (p: any) => {
+    setLabelModalData({
+      title: `สร้างและพิมพ์บาร์โค้ด & QR Code: ${p.name}`,
+      docNo: p.barcode,
+      items: [
+        {
+          product_id: p.id,
+          name: p.name,
+          barcode: p.barcode,
+          qty: Math.max(1, p.stock_qty || 1),
+          unit: p.unit || 'ชิ้น',
+          sell_price: p.sell_price,
+          cost_price: p.cost_price,
+        },
+      ],
+    });
+    setShowLabelModal(true);
+  };
+
+  const handleOpenBatchBarcode = () => {
+    if (products.length === 0) {
+      alert('ไม่พบรายการสินค้าสำหรับสร้าง Barcode / QR Code');
+      return;
+    }
+    setLabelModalData({
+      title: `พิมพ์สติกเกอร์บาร์โค้ด & QR Code สินค้า (${products.length} รายการ)`,
+      docNo: `INV-${Date.now().toString().slice(-6)}`,
+      items: products.map((p) => ({
+        product_id: p.id,
+        name: p.name,
+        barcode: p.barcode,
+        qty: Math.max(1, p.stock_qty || 1),
+        unit: p.unit || 'ชิ้น',
+        sell_price: p.sell_price,
+        cost_price: p.cost_price,
+      })),
+    });
+    setShowLabelModal(true);
   };
 
   useEffect(() => { load(); }, [search, catFilter, lowOnly]);
@@ -91,9 +138,24 @@ export default function Inventory() {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-slate-800">สต็อกสินค้า</h1>
-        <button onClick={load} className="btn-outline"><RefreshCw size={16} /> รีเฟรช</button>
+        <div className="flex items-center gap-2">
+          {tab === 'stock' && products.length > 0 && (
+            <button
+              type="button"
+              onClick={handleOpenBatchBarcode}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+              title="พิมพ์สติกเกอร์บาร์โค้ดและ QR Code ของสินค้าทั้งหมดในตาราง"
+            >
+              <QrCode size={15} />
+              <span>สร้าง Barcode / QR Code</span>
+            </button>
+          )}
+          <button onClick={load} className="btn-outline">
+            <RefreshCw size={16} /> รีเฟรช
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -164,12 +226,23 @@ export default function Inventory() {
                         : <span className="badge-green">ปกติ</span>}
                     </td>
                     <td>
-                      <button
-                        onClick={() => { setSelectedProduct(p); setNewQty(String(p.stock_qty)); setAdjustModal(true); }}
-                        className="btn-outline btn-sm"
-                      >
-                        ปรับสต็อก
-                      </button>
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenProductBarcode(p)}
+                          className="px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50/90 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer hover:border-blue-300 active:scale-95 shadow-2xs whitespace-nowrap"
+                          title="สร้างและพิมพ์ Barcode / QR Code สำหรับสินค้านี้"
+                        >
+                          <QrCode size={13} className="text-blue-600" />
+                          <span>Barcode / QR</span>
+                        </button>
+                        <button
+                          onClick={() => { setSelectedProduct(p); setNewQty(String(p.stock_qty)); setAdjustModal(true); }}
+                          className="btn-outline btn-sm whitespace-nowrap"
+                        >
+                          ปรับสต็อก
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -259,6 +332,20 @@ export default function Inventory() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Barcode & QR Label Printing Modal */}
+      {showLabelModal && labelModalData && (
+        <BarcodeLabelModal
+          title={labelModalData.title}
+          docNo={labelModalData.docNo}
+          docType="PRODUCT"
+          items={labelModalData.items}
+          onClose={() => {
+            setShowLabelModal(false);
+            setLabelModalData(null);
+          }}
+        />
       )}
     </div>
   );
