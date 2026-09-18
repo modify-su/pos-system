@@ -310,6 +310,15 @@ async function initializePostgresSchema() {
     CREATE INDEX IF NOT EXISTS idx_po_items_po_id ON po_items(po_id);
     CREATE INDEX IF NOT EXISTS idx_requisitions_status_created ON stock_requisitions(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_requisition_items_req ON requisition_items(req_id);
+
+    CREATE TABLE IF NOT EXISTS uploaded_files (
+      filename VARCHAR(255) PRIMARY KEY,
+      mime_type VARCHAR(100) NOT NULL,
+      data BYTEA NOT NULL,
+      size INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_uploaded_files_filename ON uploaded_files(filename);
   `);
 
   // Seed default settings if empty
@@ -533,6 +542,14 @@ async function initializeSqliteSchema() {
   await run(`CREATE INDEX IF NOT EXISTS idx_po_created_status ON purchase_orders(created_at, status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_requisitions_status ON stock_requisitions(status)`);
 
+  await run(`CREATE TABLE IF NOT EXISTS uploaded_files (
+    filename TEXT PRIMARY KEY,
+    mime_type TEXT NOT NULL,
+    data BLOB NOT NULL,
+    size INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // Seed default settings if empty
   const defaultRoles = {
     admin: ['dashboard', 'pos', 'inventory', 'stock-in', 'stock-out', 'products', 'categories', 'reports', 'settings'],
@@ -603,6 +620,110 @@ async function initializeDatabase() {
   }
 }
 
+/**
+ * Save an uploaded file into database (PostgreSQL BYTEA or SQLite BLOB)
+ */
+async function saveUploadedFile(filename, mimeType, filePathOrBuffer) {
+  try {
+    const buffer = Buffer.isBuffer(filePathOrBuffer)
+      ? filePathOrBuffer
+      : fs.readFileSync(filePathOrBuffer);
+    const size = buffer.length;
+    const safeMime = mimeType || 'image/jpeg';
+
+    if (isPostgres && pool) {
+      await pool.query(
+        `INSERT INTO uploaded_files (filename, mime_type, data, size)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (filename) DO UPDATE SET
+           mime_type = EXCLUDED.mime_type,
+           data = EXCLUDED.data,
+           size = EXCLUDED.size`,
+        [filename, safeMime, buffer, size]
+      );
+    } else {
+      await run(
+        `INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data, size)
+         VALUES (?, ?, ?, ?)`,
+        [filename, safeMime, buffer, size]
+      );
+    }
+    return true;
+  } catch (err) {
+    console.error(`Failed to save uploaded file "${filename}" to database:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Get an uploaded file from database by filename
+ */
+async function getUploadedFile(filename) {
+  try {
+    if (isPostgres && pool) {
+      const res = await pool.query(
+        'SELECT filename, mime_type, data, size FROM uploaded_files WHERE filename = $1',
+        [filename]
+      );
+      return res.rows[0] || null;
+    } else {
+      return new Promise((resolve, reject) => {
+        getDb().get(
+          'SELECT filename, mime_type, data, size FROM uploaded_files WHERE filename = ?',
+          [filename],
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row || null);
+          }
+        );
+      });
+    }
+  } catch (err) {
+    console.error(`Error querying uploaded file "${filename}":`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Automatically sync any local upload files to the database
+ */
+async function syncLocalUploadsToDb(uploadsDir) {
+  if (!uploadsDir || !fs.existsSync(uploadsDir)) return;
+  try {
+    const files = fs.readdirSync(uploadsDir).filter((f) => !f.startsWith('.'));
+    for (const filename of files) {
+      const filePath = path.join(uploadsDir, filename);
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+
+      let exists = false;
+      if (isPostgres && pool) {
+        const res = await pool.query('SELECT 1 FROM uploaded_files WHERE filename = $1', [filename]);
+        exists = (res.rowCount || 0) > 0;
+      } else {
+        const row = await get('SELECT 1 FROM uploaded_files WHERE filename = ?', [filename]);
+        exists = Boolean(row);
+      }
+
+      if (!exists) {
+        const ext = path.extname(filename).toLowerCase();
+        const mimeType = ext === '.png' ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+          : ext === '.webp' ? 'image/webp'
+          : ext === '.gif' ? 'image/gif'
+          : ext === '.svg' ? 'image/svg+xml'
+          : 'application/octet-stream';
+
+        const buffer = fs.readFileSync(filePath);
+        await saveUploadedFile(filename, mimeType, buffer);
+        console.log(`📦 Auto-synced "${filename}" to database`);
+      }
+    }
+  } catch (err) {
+    console.warn('Auto-sync uploads to DB warning:', err.message);
+  }
+}
+
 module.exports = {
   get isPostgres() { return isPostgres; },
   get pool() { return pool; },
@@ -612,4 +733,7 @@ module.exports = {
   all,
   translateSql,
   initializeDatabase,
+  saveUploadedFile,
+  getUploadedFile,
+  syncLocalUploadsToDb,
 };

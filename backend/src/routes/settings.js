@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const multer = require('multer');
-const { run, get, all } = require('../db/database');
+const { run, get, all, saveUploadedFile } = require('../db/database');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { emitEvent } = require('../realtime');
 const memoryCache = require('../utils/cache');
@@ -236,6 +236,7 @@ router.post('/logo', authenticate, requireRole('admin'), upload.single('logo'), 
 
     const logoUrl = `/uploads/${req.file.filename}`;
     mirrorUploadedFile(req.file.path, req.file.filename);
+    await saveUploadedFile(req.file.filename, req.file.mimetype, req.file.path);
 
     // Load existing store_info
     let storeInfo = {

@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { run, get, all } = require('../db/database');
+const { run, get, all, saveUploadedFile } = require('../db/database');
 const { authenticate } = require('../middleware/auth');
 const { emitEvent } = require('../realtime');
 
@@ -62,7 +62,7 @@ function mirrorUploadedFile(uploadedFilePath, filename) {
 
 // POST /api/products/upload - Upload product image file
 router.post('/upload', authenticate, (req, res) => {
-  upload.single('image')(req, res, (err) => {
+  upload.single('image')(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ message: err.message || 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ' });
     }
@@ -71,6 +71,7 @@ router.post('/upload', authenticate, (req, res) => {
     }
     const fileUrl = `/uploads/${req.file.filename}`;
     mirrorUploadedFile(req.file.path, req.file.filename);
+    await saveUploadedFile(req.file.filename, req.file.mimetype, req.file.path);
     res.json({
       url: fileUrl,
       filename: req.file.filename,

@@ -226,10 +226,24 @@ export default function Products() {
                 <td className="text-center">
                   <div className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center border border-slate-200 mx-auto">
                     {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
-                    ) : (
+                      <img
+                        src={p.image_url}
+                        alt={p.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                          const fallback = (e.target as HTMLElement).parentElement?.querySelector('.fallback-icon') as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="fallback-icon items-center justify-center"
+                      style={{ display: p.image_url ? 'none' : 'flex' }}
+                    >
                       <Package size={18} className="text-slate-400" />
-                    )}
+                    </div>
                   </div>
                 </td>
                 <td className="font-mono text-xs text-slate-500">{p.barcode}</td>

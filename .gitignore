@@ -17,7 +17,8 @@ build/
 *.sqlite
 
 # Uploaded files
-backend/uploads/*
+# Allow initial and current uploads in git so Docker builds and deployments include image assets
+# backend/uploads/*
 !backend/uploads/.gitkeep
 
 # Environment variables & secrets

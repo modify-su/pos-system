@@ -13,7 +13,7 @@ const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const { initializeDatabase } = require('./db/database');
+const { initializeDatabase, getUploadedFile, syncLocalUploadsToDb } = require('./db/database');
 const { initRealtime } = require('./realtime');
 
 const app = express();
@@ -64,6 +64,39 @@ candidateUploadDirs.forEach((dir) => {
   }
   if (fs.existsSync(dir)) {
     app.use('/uploads', express.static(dir));
+  }
+});
+
+// Fallback image serving route from Database (for Render & ephemeral clouds)
+const primaryUploadDir = candidateUploadDirs[0] || path.join(__dirname, '../uploads');
+app.get('/uploads/:filename', async (req, res, next) => {
+  try {
+    const filename = path.basename(req.params.filename);
+    const file = await getUploadedFile(filename);
+    if (!file || !file.data) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+
+    // Cache file locally to disk so subsequent requests are served by express.static
+    try {
+      if (!fs.existsSync(primaryUploadDir)) {
+        fs.mkdirSync(primaryUploadDir, { recursive: true });
+      }
+      const localPath = path.join(primaryUploadDir, filename);
+      if (!fs.existsSync(localPath)) {
+        fs.writeFileSync(localPath, file.data);
+      }
+    } catch (cacheErr) {
+      console.warn('Local upload cache notice:', cacheErr.message);
+    }
+
+    res.setHeader('Content-Type', file.mime_type || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    res.setHeader('Content-Length', file.size || file.data.length);
+    return res.send(file.data);
+  } catch (err) {
+    console.error('Error serving upload from database:', err);
+    next();
   }
 });
 
@@ -153,6 +186,11 @@ initializeDatabase()
       }
       console.log(`📦 Health: http://localhost:${PORT}/api/health`);
       console.log(`🔌 WebSockets: ws://localhost:${PORT}/socket.io/\n`);
+
+      // Sync local uploads folder to database in background
+      syncLocalUploadsToDb(path.join(__dirname, '../uploads')).catch((err) => {
+        console.warn('Background uploads sync notice:', err.message);
+      });
     });
   })
   .catch((err) => {
